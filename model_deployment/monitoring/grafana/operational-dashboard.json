@@ -1,0 +1,11 @@
+{
+  "title": "MLOps Blueprint - Operational Inference",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {"type": "timeseries", "title": "Request rate", "targets": [{"expr": "sum(rate(inference_requests_total[5m])) by (model, version)"}]},
+    {"type": "timeseries", "title": "Error rate", "targets": [{"expr": "sum(rate(inference_errors_total[5m])) by (model, version)"}]},
+    {"type": "timeseries", "title": "P95 inference latency", "targets": [{"expr": "histogram_quantile(0.95, sum(rate(inference_duration_seconds_bucket[5m])) by (le, model, version))"}]},
+    {"type": "stat", "title": "Model availability", "targets": [{"expr": "max(model_up) by (model, version)"}]}
+  ]
+}

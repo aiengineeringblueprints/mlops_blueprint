@@ -1,0 +1,60 @@
+services:
+  model-service:
+    image: "{{ image }}"
+    environment:
+      MODEL_NAME: "{{ model_name }}"
+      MODEL_VERSION: "{{ model_version }}"
+      ENABLE_PROMETHEUS_METRICS: "true"
+    ports:
+      - "{{ model_port }}:8080"
+{% if model_platform %}
+    platform: "{{ model_platform }}"
+{% endif %}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+{% if enable_prometheus %}
+  prometheus:
+    image: "{{ prometheus_image }}"
+    ports:
+      - "{{ prometheus_port }}:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      model-service:
+        condition: service_healthy
+    restart: unless-stopped
+{% endif %}
+{% if enable_grafana %}
+  grafana:
+    image: "{{ grafana_image }}"
+    ports:
+      - "{{ grafana_port }}:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+{% if enable_prometheus %}
+    depends_on:
+      - prometheus
+{% endif %}
+    restart: unless-stopped
+{% endif %}
+{% if enable_prometheus or enable_grafana %}
+volumes:
+{% if enable_prometheus %}
+  prometheus-data: {}
+{% endif %}
+{% if enable_grafana %}
+  grafana-data: {}
+{% endif %}
+{% endif %}

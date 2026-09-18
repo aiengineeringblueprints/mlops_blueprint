@@ -1,0 +1,38 @@
+# Local secrets/configuration
+.env
+*.env
+!.env.example
+
+# LakeFS local data
+data/*
+
+# Python / local runtime
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# MLflow local runtime
+mlruns/
+mlflow.db
+
+# Local services / deployment build state
+localminio
+model_deployment/container/model_artifact/
+model_deployment/container/.model_artifact_download/
+model_deployment/deployments/docker_compose/.compose/
+
+# Virtual environments / packaging
+venv/
+.venv/
+env/
+*.egg-info/
+
+# Generated training outputs
+model/
+metrics/
+
+# Logs / coverage / editor files
+*.log
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,41 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: {{ service_name }}
+  namespace: {{ namespace }}
+  annotations:
+    serving.kserve.io/deploymentMode: "{{ deployment_mode }}"
+  labels:
+    app.kubernetes.io/name: {{ service_name }}
+    mlops.blueprint/model: {{ model_name | replace('_', '-') }}
+    mlops.blueprint/version: "{{ model_version }}"
+spec:
+  predictor:
+    minReplicas: {{ min_replicas }}
+    maxReplicas: {{ max_replicas }}
+    containers:
+      - name: kserve-container
+        image: {{ image }}
+        imagePullPolicy: {{ image_pull_policy }}
+        env:
+          - name: MODEL_NAME
+            value: "{{ model_name }}"
+          - name: MODEL_VERSION
+            value: "{{ model_version }}"
+        ports:
+          - name: http
+            containerPort: 8080
+            protocol: TCP
+        resources:
+          requests:
+            cpu: "{{ cpu_request }}"
+            memory: "{{ mem_request }}"
+          limits:
+            cpu: "{{ cpu_limit }}"
+            memory: "{{ mem_limit }}"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 2
+          periodSeconds: 5

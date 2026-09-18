@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ monitor_name }}
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/managed-by: mlops-blueprint
+    release: {{ prometheus_release_label }}
+spec:
+  selector:
+    matchLabels:
+      serving.kserve.io/inferenceservice: {{ service_name }}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: {{ interval }}
