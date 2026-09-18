@@ -46,6 +46,7 @@ model_deployment/
 │   ├── entrypoint.py                     # Start shared model server
 │   ├── inference.py                      # Input handling and model prediction
 │   └── metrics.py                        # Prometheus or no-op metrics
+└── test/                                 # Testing for the endpoint working
 ```
 
 ## 2. `.env` Setup
@@ -135,6 +136,15 @@ Then check health:
 curl http://127.0.0.1:18000/health
 ```
 
+Optional smoke tests:
+
+```bash
+python model_deployment/test/test_kserve.py
+python model_deployment/test/test_kserve_monitoring.py
+python model_deployment/test/test_kserve_prometheus.py
+python model_deployment/test/test_kserve_grafana.py
+```
+
 ## 4. AWS SageMaker Deployment
 
 ### Prerequisites
@@ -183,6 +193,11 @@ aws sagemaker describe-endpoint \
 
 The expected status is `InService`.
 
+Optional inference smoke test:
+
+```bash
+python model_deployment/test/test_sagemaker.py
+```
 
 ## 5. Docker Compose Deployment
 
@@ -233,14 +248,18 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/metrics
 ```
 
+Optional smoke test:
+
+```bash
+python model_deployment/test/test_docker_compose.py
+```
+
 ## 6. Teardown and Changing Deployment
 
 Teardown is a dry-run by default:
 
 ```bash
-python -m model_deployment.teardown --backend aws_sagemaker
-python -m model_deployment.teardown --backend kubernetes
-python -m model_deployment.teardown --backend docker_compose
+python -m model_deployment.teardown --backend <backend>
 ```
 
 To actually remove the selected deployment:
