@@ -1,7 +1,8 @@
-"""Manual Docker Compose deployment smoke test.
+"""Docker Compose deployment integration and evaluation test.
 
 This is an integration helper, not a unit test. It validates the running
-model-service and, when enabled, the bundled Prometheus and Grafana services.
+model-service and configured monitoring first, then measures Docker Compose
+resource utilization and executes the thesis latency/throughput benchmark.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from urllib.error import HTTPError
@@ -22,25 +24,28 @@ from dotenv import load_dotenv
 from PIL import Image
 
 
-def find_repo_root(start: Path) -> Path:
-    """Find the repository root so this file can live anywhere under model_deployment/test."""
+def find_project_root(start: Path) -> Path:
+    """Locate the repository root from the split training/deployment structure."""
     for candidate in (start, *start.parents):
-        if (candidate / "deploy.py").is_file() and (
-            candidate / "model_deployment"
-        ).is_dir():
+        if (candidate / "model_deployment").is_dir() and (candidate / "model_training").is_dir():
             return candidate
-    raise RuntimeError(
-        "Could not locate repository root containing deploy.py and model_deployment/"
-    )
+    raise RuntimeError("Could not locate repository root containing model_training/ and model_deployment/")
 
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = find_repo_root(HERE)
+PROJECT_ROOT = find_project_root(HERE)
+DEPLOYMENT_ROOT = PROJECT_ROOT / "model_deployment"
+TRAINING_ROOT = PROJECT_ROOT / "model_training"
 
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from model_deployment import safe_resource_name
+from model_deployment.local_model import configured_deployment_model_name
+from model_deployment.test.mock_request.benchmark_deployment import (
+    execute_http_benchmark,
+    percentile,
+)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -48,7 +53,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 IMAGE_SIZE = (224, 224)
-DEFAULT_IMAGE = REPO_ROOT / "data" / "val" / "Standard-Schraube" / "IMG_8059.JPG"
+DEFAULT_IMAGE = TRAINING_ROOT / "data" / "val" / "Standard-Schraube" / "IMG_8059.JPG"
 
 CLASS_NAMES = [
     "Schraube-Zylinder_ganz",
@@ -61,6 +66,17 @@ CLASS_NAMES = [
 MODEL_SERVICE_NAME = "model-service"
 PROMETHEUS_SERVICE_NAME = "prometheus"
 GRAFANA_SERVICE_NAME = "grafana"
+
+# Docker Compose evaluation protocol used by the thesis. Keep these values
+# fixed so repeated runs remain directly comparable.
+RESOURCE_WORKLOAD_REQUESTS = 120
+RESOURCE_REQUEST_INTERVAL_SECONDS = 0.5
+RESOURCE_SAMPLE_INTERVAL_SECONDS = 0.5
+RESOURCE_POST_WAIT_SECONDS = 2.0
+PERFORMANCE_WARMUP_REQUESTS = 5
+PERFORMANCE_MEASURED_REQUESTS = 100
+PERFORMANCE_CONCURRENCY = 5
+PERFORMANCE_TIMEOUT_SECONDS = 60.0
 
 
 def get_bool(name: str, default: bool = False) -> bool:
@@ -171,7 +187,7 @@ def get_project_name(model_name: str) -> str:
 def get_compose_file(project_name: str) -> Path:
     """Return the generated Compose manifest for the running project."""
     return (
-        REPO_ROOT
+        PROJECT_ROOT
         / "model_deployment"
         / "deployments"
         / "docker_compose"
@@ -201,6 +217,320 @@ def get_running_services(project_name: str, compose_file: Path) -> set[str]:
         text=True,
     )
     return {line.strip() for line in completed.stdout.splitlines() if line.strip()}
+
+
+def get_model_service_container_id(project_name: str, compose_file: Path) -> str:
+    """Return the running model-service container ID for this Compose project."""
+    completed = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-p",
+            project_name,
+            "-f",
+            str(compose_file),
+            "ps",
+            "-q",
+            MODEL_SERVICE_NAME,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    container_id = completed.stdout.strip()
+    if not container_id:
+        raise RuntimeError(
+            f"Could not resolve running {MODEL_SERVICE_NAME!r} container "
+            f"for Compose project {project_name!r}"
+        )
+    return container_id
+
+
+def parse_memory_to_mib(value: str) -> float:
+    """Convert one Docker memory value such as 638MiB or 1.2GiB to MiB."""
+    compact = value.strip().replace(" ", "")
+    if not compact:
+        raise RuntimeError("Docker memory usage value is empty")
+
+    split_at = 0
+    for index, character in enumerate(compact):
+        if not (character.isdigit() or character in ".+-"):
+            split_at = index
+            break
+    else:
+        split_at = len(compact)
+
+    try:
+        amount = float(compact[:split_at])
+    except ValueError as exc:
+        raise RuntimeError(f"Could not parse Docker memory value: {value!r}") from exc
+
+    unit = compact[split_at:].lower()
+    factors = {
+        "": 1.0 / (1024.0 * 1024.0),
+        "b": 1.0 / (1024.0 * 1024.0),
+        "kb": 1000.0 / (1024.0 * 1024.0),
+        "kib": 1.0 / 1024.0,
+        "mb": 1_000_000.0 / (1024.0 * 1024.0),
+        "mib": 1.0,
+        "gb": 1_000_000_000.0 / (1024.0 * 1024.0),
+        "gib": 1024.0,
+        "tb": 1_000_000_000_000.0 / (1024.0 * 1024.0),
+        "tib": 1024.0 * 1024.0,
+    }
+    if unit not in factors:
+        raise RuntimeError(f"Unsupported Docker memory unit in {value!r}")
+
+    return amount * factors[unit]
+
+
+def read_container_resources(container_id: str) -> tuple[float, float]:
+    """Read one CPU-percent and memory-MiB sample from Docker stats."""
+    completed = subprocess.run(
+        [
+            "docker",
+            "stats",
+            "--no-stream",
+            "--format",
+            "{{.CPUPerc}}|{{.MemUsage}}",
+            container_id,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    line = completed.stdout.strip().splitlines()
+    if not line:
+        raise RuntimeError(
+            f"docker stats returned no data for container {container_id}"
+        )
+
+    try:
+        cpu_text, memory_text = line[0].split("|", 1)
+        cpu_percent = float(cpu_text.strip().rstrip("%"))
+        memory_used = memory_text.split("/", 1)[0].strip()
+        memory_mib = parse_memory_to_mib(memory_used)
+    except (ValueError, IndexError) as exc:
+        raise RuntimeError(f"Could not parse docker stats output: {line[0]!r}") from exc
+
+    return cpu_percent, memory_mib
+
+
+def run_resource_utilization_measurement(
+    project_name: str,
+    compose_file: Path,
+    model_base_url: str,
+    image_path: Path,
+) -> dict[str, float | int]:
+    """Measure model-service CPU/RAM before, during, and after 120 requests."""
+    container_id = get_model_service_container_id(project_name, compose_file)
+    batch = load_batch(image_path)
+
+    logger.info("=== Docker Compose Resource Utilization ===")
+    logger.info("Measuring model-service container: %s", container_id[:12])
+
+    idle_cpu, idle_memory = read_container_resources(container_id)
+    logger.info(
+        "Idle resources: CPU=%.2f%% memory=%.1f MiB",
+        idle_cpu,
+        idle_memory,
+    )
+
+    samples: list[tuple[float, float]] = []
+    sampling_errors: list[BaseException] = []
+    stop_sampling = threading.Event()
+
+    def sample_resources() -> None:
+        while not stop_sampling.is_set():
+            try:
+                samples.append(read_container_resources(container_id))
+            except (
+                BaseException
+            ) as exc:  # Preserve the sampler error for the main thread.
+                sampling_errors.append(exc)
+                stop_sampling.set()
+                return
+            stop_sampling.wait(RESOURCE_SAMPLE_INTERVAL_SECONDS)
+
+    sampler = threading.Thread(
+        target=sample_resources,
+        name="docker-compose-resource-sampler",
+        daemon=True,
+    )
+    sampler.start()
+
+    successful = 0
+    failed = 0
+    workload_error: BaseException | None = None
+
+    try:
+        logger.info(
+            "Starting resource workload: requests=%d interval=%.1fs",
+            RESOURCE_WORKLOAD_REQUESTS,
+            RESOURCE_REQUEST_INTERVAL_SECONDS,
+        )
+        for index in range(RESOURCE_WORKLOAD_REQUESTS):
+            try:
+                predict(model_base_url, batch)
+                successful += 1
+            except BaseException as exc:
+                failed += 1
+                workload_error = exc
+                break
+
+            if (index + 1) % 10 == 0 or index + 1 == RESOURCE_WORKLOAD_REQUESTS:
+                logger.info(
+                    "Resource workload progress: %d/%d",
+                    index + 1,
+                    RESOURCE_WORKLOAD_REQUESTS,
+                )
+
+            if index + 1 < RESOURCE_WORKLOAD_REQUESTS:
+                time.sleep(RESOURCE_REQUEST_INTERVAL_SECONDS)
+    finally:
+        stop_sampling.set()
+        sampler.join(timeout=10.0)
+
+    if sampler.is_alive():
+        raise RuntimeError("Docker resource sampler did not stop cleanly")
+    if sampling_errors:
+        raise RuntimeError("Docker resource sampling failed") from sampling_errors[0]
+    if workload_error is not None or failed:
+        raise RuntimeError(
+            f"Resource workload failed after {successful} successful requests"
+        ) from workload_error
+    if not samples:
+        raise RuntimeError("No Docker resource samples were collected during workload")
+
+    peak_cpu = max(sample[0] for sample in samples)
+    peak_memory = max(sample[1] for sample in samples)
+
+    time.sleep(RESOURCE_POST_WAIT_SECONDS)
+    post_cpu, post_memory = read_container_resources(container_id)
+
+    result: dict[str, float | int] = {
+        "requests": RESOURCE_WORKLOAD_REQUESTS,
+        "successful_requests": successful,
+        "failed_requests": failed,
+        "idle_cpu_percent": idle_cpu,
+        "idle_memory_mib": idle_memory,
+        "peak_workload_cpu_percent": peak_cpu,
+        "peak_workload_memory_mib": peak_memory,
+        "post_workload_cpu_percent": post_cpu,
+        "post_workload_memory_mib": post_memory,
+        "resource_samples": len(samples),
+    }
+
+    logger.info("Resource utilization completed")
+    logger.info(
+        "Requests: %d successful=%d failed=%d",
+        RESOURCE_WORKLOAD_REQUESTS,
+        successful,
+        failed,
+    )
+    logger.info("Idle CPU: %.2f%%", idle_cpu)
+    logger.info("Idle memory: %.1f MiB", idle_memory)
+    logger.info("Peak workload CPU: %.2f%%", peak_cpu)
+    logger.info("Peak workload memory: %.1f MiB", peak_memory)
+    logger.info("Post-workload CPU: %.2f%%", post_cpu)
+    logger.info("Post-workload memory: %.1f MiB", post_memory)
+    logger.info("Resource samples collected: %d", len(samples))
+
+    return result
+
+
+def run_performance_benchmark(
+    model_base_url: str,
+    image_path: Path,
+) -> dict[str, float | int]:
+    """Run the thesis Docker Compose latency/throughput benchmark."""
+    logger.info("=== Docker Compose Performance / Load Benchmark ===")
+    batch = load_batch(image_path)
+    prediction_url = f"{model_base_url}/predict"
+
+    latencies, successful, failed, duration = execute_http_benchmark(
+        url=prediction_url,
+        batch=batch,
+        requests=PERFORMANCE_MEASURED_REQUESTS,
+        concurrency=PERFORMANCE_CONCURRENCY,
+        warmup=PERFORMANCE_WARMUP_REQUESTS,
+        timeout=PERFORMANCE_TIMEOUT_SECONDS,
+    )
+
+    if failed or successful != PERFORMANCE_MEASURED_REQUESTS:
+        raise RuntimeError(
+            "Docker Compose performance benchmark did not complete successfully: "
+            f"successful={successful}, failed={failed}, "
+            f"expected={PERFORMANCE_MEASURED_REQUESTS}"
+        )
+    if not latencies:
+        raise RuntimeError(
+            "Performance benchmark produced no successful latency samples"
+        )
+
+    latency_ms = [value * 1000.0 for value in latencies]
+    throughput = successful / duration if duration > 0 else 0.0
+    result: dict[str, float | int] = {
+        "warmup_requests": PERFORMANCE_WARMUP_REQUESTS,
+        "measured_requests": PERFORMANCE_MEASURED_REQUESTS,
+        "concurrency": PERFORMANCE_CONCURRENCY,
+        "successful_requests": successful,
+        "failed_requests": failed,
+        "duration_seconds": duration,
+        "throughput_requests_per_second": throughput,
+        "mean_latency_ms": sum(latency_ms) / len(latency_ms),
+        "median_latency_ms": percentile(latency_ms, 50),
+        "p95_latency_ms": percentile(latency_ms, 95),
+        "min_latency_ms": min(latency_ms),
+        "max_latency_ms": max(latency_ms),
+    }
+
+    logger.info("Performance benchmark completed")
+    logger.info("Warm-up requests: %d", PERFORMANCE_WARMUP_REQUESTS)
+    logger.info(
+        "Measured requests: %d successful=%d failed=%d concurrency=%d",
+        PERFORMANCE_MEASURED_REQUESTS,
+        successful,
+        failed,
+        PERFORMANCE_CONCURRENCY,
+    )
+    logger.info("Measured duration: %.3f s", duration)
+    logger.info("Throughput: %.3f requests/s", throughput)
+    logger.info("Mean latency: %.3f ms", result["mean_latency_ms"])
+    logger.info("Median latency: %.3f ms", result["median_latency_ms"])
+    logger.info("P95 latency: %.3f ms", result["p95_latency_ms"])
+    logger.info("Minimum latency: %.3f ms", result["min_latency_ms"])
+    logger.info("Maximum latency: %.3f ms", result["max_latency_ms"])
+
+    return result
+
+
+def log_combined_evaluation_summary(
+    resource_result: dict[str, float | int],
+    performance_result: dict[str, float | int],
+) -> None:
+    """Log one compact final summary for the Docker Compose evaluation run."""
+    logger.info("=== Docker Compose Combined Evaluation Summary ===")
+    logger.info(
+        "Resource: idle CPU=%.2f%% RAM=%.1f MiB | peak CPU=%.2f%% RAM=%.1f MiB | "
+        "post CPU=%.2f%% RAM=%.1f MiB",
+        float(resource_result["idle_cpu_percent"]),
+        float(resource_result["idle_memory_mib"]),
+        float(resource_result["peak_workload_cpu_percent"]),
+        float(resource_result["peak_workload_memory_mib"]),
+        float(resource_result["post_workload_cpu_percent"]),
+        float(resource_result["post_workload_memory_mib"]),
+    )
+    logger.info(
+        "Performance: throughput=%.3f req/s | mean=%.3f ms | median=%.3f ms | "
+        "p95=%.3f ms | min=%.3f ms | max=%.3f ms",
+        float(performance_result["throughput_requests_per_second"]),
+        float(performance_result["mean_latency_ms"]),
+        float(performance_result["median_latency_ms"]),
+        float(performance_result["p95_latency_ms"]),
+        float(performance_result["min_latency_ms"]),
+        float(performance_result["max_latency_ms"]),
+    )
 
 
 def verify_running_services(
@@ -505,7 +835,6 @@ def wait_for_prometheus(
     )
 
 
-
 def wait_for_external_prometheus(
     prometheus_base_url: str,
     model_name: str,
@@ -610,7 +939,7 @@ def wait_for_grafana(grafana_base_url: str, timeout_seconds: float = 45.0) -> No
 def verify_grafana_dashboard(project_name: str) -> None:
     """Verify that the framework generated the provisioned Grafana dashboard file."""
     dashboard = (
-        REPO_ROOT
+        PROJECT_ROOT
         / "model_deployment"
         / "deployments"
         / "docker_compose"
@@ -632,10 +961,10 @@ def verify_grafana_dashboard(project_name: str) -> None:
 
 
 def main() -> int:
-    """Run the Docker Compose integration smoke test."""
-    load_dotenv(REPO_ROOT / ".env", override=False)
+    """Run Docker Compose functional, monitoring, resource, and performance checks."""
+    load_dotenv(DEPLOYMENT_ROOT / ".env", override=False)
 
-    model_name = os.getenv("MODEL_NAME", "champion_model")
+    model_name = configured_deployment_model_name("champion_model") or "champion_model"
     model_port = int(os.getenv("COMPOSE_MODEL_PORT", "8000"))
     prometheus_port = int(os.getenv("COMPOSE_PROMETHEUS_PORT", "9090"))
     grafana_port = int(os.getenv("COMPOSE_GRAFANA_PORT", "3000"))
@@ -645,11 +974,11 @@ def main() -> int:
 
     # Test-only URLs for pre-existing monitoring infrastructure.
     external_prometheus_url = (
-        os.getenv("TEST_EXTERNAL_PROMETHEUS_URL") or ""
-    ).strip().rstrip("/")
+        (os.getenv("TEST_EXTERNAL_PROMETHEUS_URL") or "").strip().rstrip("/")
+    )
     external_grafana_url = (
-        os.getenv("TEST_EXTERNAL_GRAFANA_URL") or ""
-    ).strip().rstrip("/")
+        (os.getenv("TEST_EXTERNAL_GRAFANA_URL") or "").strip().rstrip("/")
+    )
 
     project_name = get_project_name(model_name)
     compose_file = get_compose_file(project_name)
@@ -719,11 +1048,28 @@ def main() -> int:
                 "not set; external Grafana verification skipped"
             )
 
-        logger.info("Docker Compose integration smoke test PASSED")
+        logger.info("Docker Compose functional/monitoring checks PASSED")
+
+        resource_result = run_resource_utilization_measurement(
+            project_name,
+            compose_file,
+            model_base_url,
+            image_path,
+        )
+        performance_result = run_performance_benchmark(
+            model_base_url,
+            image_path,
+        )
+
+        # Confirm that the model service is still healthy after both workloads.
+        verify_health(model_base_url, model_name)
+        log_combined_evaluation_summary(resource_result, performance_result)
+
+        logger.info("Docker Compose integration/evaluation test PASSED")
         return 0
 
     except Exception:
-        logger.exception("Docker Compose integration smoke test FAILED")
+        logger.exception("Docker Compose integration/evaluation test FAILED")
         return 1
 
 

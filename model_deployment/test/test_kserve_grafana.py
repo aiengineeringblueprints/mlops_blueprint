@@ -22,8 +22,10 @@ logger = logging.getLogger(__name__)
 
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parents[1]
-load_dotenv(REPO_ROOT / ".env", override=False)
+PROJECT_ROOT = HERE.parents[1]
+DEPLOYMENT_ROOT = PROJECT_ROOT / "model_deployment"
+TRAINING_ROOT = PROJECT_ROOT / "model_training"
+load_dotenv(DEPLOYMENT_ROOT / ".env", override=False)
 
 # Port-forward Grafana to 13000, or override TEST_GRAFANA_URL.
 GRAFANA_BASE_URL = os.getenv("TEST_GRAFANA_URL", "http://127.0.0.1:13000").rstrip("/")

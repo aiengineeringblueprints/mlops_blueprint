@@ -12,22 +12,26 @@ class DeploymentRequest:
     """User request resolved from CLI arguments and environment configuration."""
 
     target: str
-    model_name: str
-    tracking_uri: str
+    model_name: Optional[str]
+    tracking_uri: Optional[str]
     version: Optional[str] = None
     alias: str = "champion"
     dry_run: bool = False
+    local_model_path: Optional[str] = None
+    local_model_format: str = "auto"
 
 
 @dataclass(frozen=True)
 class ResolvedModel:
-    """Registered-model version selected for deployment."""
+    """Model artifact selected for deployment from MLflow or a local file."""
 
     name: str
     version: str
     source: str
     run_id: Optional[str]
     alias: Optional[str]
+    source_type: str = "mlflow"
+    model_format: str = "mlflow"
 
 
 @dataclass(frozen=True)

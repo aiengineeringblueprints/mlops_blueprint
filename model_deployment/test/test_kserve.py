@@ -22,11 +22,13 @@ logger = logging.getLogger(__name__)
 
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parents[1]
-load_dotenv(REPO_ROOT / ".env", override=False)
+PROJECT_ROOT = HERE.parents[1]
+DEPLOYMENT_ROOT = PROJECT_ROOT / "model_deployment"
+TRAINING_ROOT = PROJECT_ROOT / "model_training"
+load_dotenv(DEPLOYMENT_ROOT / ".env", override=False)
 
 IMAGE_SIZE = (224, 224)
-DEFAULT_IMAGE = REPO_ROOT / "data" / "val" / "Standard-Schraube" / "IMG_8059.JPG"
+DEFAULT_IMAGE = TRAINING_ROOT / "data" / "val" / "Standard-Schraube" / "IMG_8059.JPG"
 IMAGE_PATH = Path(os.getenv("IMAGE_PATH", str(DEFAULT_IMAGE)))
 
 # Use this after port-forwarding the KServe predictor to local port 18000.

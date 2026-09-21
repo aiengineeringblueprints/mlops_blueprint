@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import os
+from pathlib import Path
 import re
 from typing import Dict, Optional
 
@@ -196,24 +197,35 @@ def request_from_environment(
     tracking_uri: Optional[str] = None,
     version: Optional[str] = None,
     alias: Optional[str] = None,
+    local_model_path: Optional[str] = None,
+    local_model_format: Optional[str] = None,
+    local_model_name: Optional[str] = None,
     dry_run: bool = False,
 ) -> DeploymentRequest:
     """Build a deployment request from CLI values and common environment configuration."""
     target = target or get_value("DEPLOYMENT_BACKEND")
+    local_model_path = local_model_path or get_value("LOCAL_MODEL_PATH")
+    local_model_format = local_model_format or get_value("LOCAL_MODEL_FORMAT", "auto")
+    local_model_name = local_model_name or get_value("LOCAL_MODEL_NAME")
     model_name = model_name or get_value("MODEL_NAME")
     tracking_uri = tracking_uri or get_value("TRACKING_URI")
     version = version if version not in (None, "") else get_value("MODEL_VERSION")
     alias = alias or get_value("MODEL_ALIAS", "champion")
 
-    missing = [
-        name
-        for name, value in (
+    # LOCAL_MODEL_PATH deliberately takes precedence over MLflow. In local mode the
+    # blueprint does not require a tracking URI, registry model, alias, or version.
+    if local_model_path:
+        effective_model_name = local_model_name or Path(local_model_path).expanduser().stem
+        required_values = (("DEPLOYMENT_BACKEND/--target", target),)
+    else:
+        effective_model_name = model_name
+        required_values = (
             ("DEPLOYMENT_BACKEND/--target", target),
             ("MODEL_NAME/--model-name", model_name),
             ("TRACKING_URI/--tracking-uri", tracking_uri),
         )
-        if not value
-    ]
+
+    missing = [name for name, value in required_values if not value]
     if missing:
         raise DeploymentError(
             "CONFIGURATION_MISSING", "Missing required configuration: " + ", ".join(missing)
@@ -226,11 +238,13 @@ def request_from_environment(
 
     return DeploymentRequest(
         target=str(target),
-        model_name=str(model_name),
-        tracking_uri=str(tracking_uri),
-        version=str(version) if version is not None else None,
+        model_name=str(effective_model_name) if effective_model_name else None,
+        tracking_uri=str(tracking_uri) if tracking_uri else None,
+        version=str(version) if version is not None and not local_model_path else None,
         alias=str(alias or "champion"),
         dry_run=dry_run,
+        local_model_path=str(local_model_path) if local_model_path else None,
+        local_model_format=str(local_model_format or "auto"),
     )
 
 

@@ -1,9 +1,17 @@
 import os
+import sys
+from pathlib import Path
 from dotenv import load_dotenv
 import numpy as np
-from helper_functions import load_images_from_directory
-from train_seitlich import train_cnn
-from plot_metrics import plot_confusion_matrix
+
+MODEL_TRAINING_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = MODEL_TRAINING_ROOT.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from model_training.helper_functions import load_images_from_directory
+from model_training.train_seitlich import train_cnn
+from model_training.plot_metrics import plot_confusion_matrix
 from sklearn.preprocessing import OneHotEncoder
 import mlflow
 import mlflow.tensorflow
@@ -14,8 +22,8 @@ import logging
 import tensorflow as tf
 import yaml
 
-# Load environment variables from the .env file
-load_dotenv()
+# Load only the training-specific environment file.
+load_dotenv(MODEL_TRAINING_ROOT / ".env", override=False)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,9 +48,9 @@ mlflow.set_experiment(EXPERIMENT_NAME)
 client = MlflowClient()
 
 # Path to the data
-train_directory = "./data/train"
-val_directory = "./data/val"
-test_directory = "./data/test"
+train_directory = str(MODEL_TRAINING_ROOT / "data" / "train")
+val_directory = str(MODEL_TRAINING_ROOT / "data" / "val")
+test_directory = str(MODEL_TRAINING_ROOT / "data" / "test")
 
 # Parameters:
 image_size = (224, 224)
@@ -53,7 +61,7 @@ num_classes = len(os.listdir(train_directory))
 # MLflow: Start the tracking run
 with mlflow.start_run() as run:
     # Extract information about LakeFS reference
-    lakefs_ref_path = os.path.join("data", ".lakefs_ref.yaml")
+    lakefs_ref_path = str(MODEL_TRAINING_ROOT / "data" / ".lakefs_ref.yaml")
     repo = None
     commit = None
     if os.path.exists(lakefs_ref_path):
@@ -85,7 +93,7 @@ with mlflow.start_run() as run:
     test_images = test_images.astype("float32") / 255.0
 
     # Initialize the OneHotEncoder
-    os.makedirs("./model", exist_ok=True)
+    os.makedirs(MODEL_TRAINING_ROOT / "model", exist_ok=True)
     one_hot_encoder = OneHotEncoder(sparse_output=False)
     train_labels = one_hot_encoder.fit_transform(train_labels.reshape(-1, 1))
     val_labels = one_hot_encoder.transform(val_labels.reshape(-1, 1))
@@ -183,9 +191,9 @@ with mlflow.start_run() as run:
     cnn_test_pred = one_hot_encoder.inverse_transform(cnn_test_probs)
     # Output of the confusion matrix
     y_test_labels = one_hot_encoder.inverse_transform(y_test)
-    os.makedirs("./metrics", exist_ok=True)
+    os.makedirs(MODEL_TRAINING_ROOT / "metrics", exist_ok=True)
     plot_confusion_matrix(
-        y_test_labels, cnn_test_pred, save_path="./metrics/cnn_confusion_matrix.png"
+        y_test_labels, cnn_test_pred, save_path=str(MODEL_TRAINING_ROOT / "metrics" / "cnn_confusion_matrix.png")
     )
 
     # Binary classification evaluation
@@ -202,4 +210,4 @@ with mlflow.start_run() as run:
         }
     )
     # MLFlow: Append confusion matrix as an artifact to the run
-    mlflow.log_artifacts("./metrics", artifact_path="metrics_plots")
+    mlflow.log_artifacts(str(MODEL_TRAINING_ROOT / "metrics"), artifact_path="metrics_plots")

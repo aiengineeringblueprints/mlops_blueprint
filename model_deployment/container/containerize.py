@@ -1,4 +1,4 @@
-"""Prepare deterministic serving images from resolved MLflow artifacts."""
+"""Prepare deterministic serving images from MLflow or standalone local model artifacts."""
 from __future__ import annotations
 
 import base64
@@ -96,6 +96,9 @@ def build_docker_command(
     target: str,
     *,
     platform: str | None = None,
+    source_type: str = "mlflow",
+    model_format: str = "mlflow",
+    model_file: str | None = None,
 ) -> list[str]:
     """Build the Docker CLI command used for the selected deployment backend."""
     enable_prometheus_metrics = prometheus_metrics_enabled_for_target(target)
@@ -112,10 +115,75 @@ def build_docker_command(
             f"MODEL_VERSION={version}",
             "--build-arg",
             f"ENABLE_PROMETHEUS_METRICS={'true' if enable_prometheus_metrics else 'false'}",
-            str(PACKAGE_ROOT),
         ]
     )
+    # Keep the original MLflow command stable. Extra build arguments are required only
+    # for standalone local files.
+    if source_type != "mlflow" or model_format != "mlflow" or model_file:
+        command.extend(
+            [
+                "--build-arg",
+                f"MODEL_SOURCE={source_type}",
+                "--build-arg",
+                f"MODEL_FORMAT={model_format}",
+                "--build-arg",
+                f"MODEL_FILE={model_file or ''}",
+            ]
+        )
+    command.append(str(PACKAGE_ROOT))
     return command
+
+
+def _stage_mlflow_artifact(model_uri: str, artifact_dir: Path, download_dir: Path) -> None:
+    """Download and stage the existing MLflow artifact exactly as before."""
+    try:
+        import mlflow
+    except ImportError as exc:
+        raise DeploymentError("IMAGE_BUILD_FAILED", "MLflow is not installed") from exc
+
+    logger.info("Downloading resolved MLflow artifact '%s'", model_uri)
+    downloaded = mlflow.artifacts.download_artifacts(
+        artifact_uri=model_uri, dst_path=str(download_dir)
+    )
+    downloaded_path = Path(downloaded).resolve()
+    if not downloaded_path.exists():
+        raise DeploymentError(
+            "IMAGE_BUILD_FAILED",
+            f"MLflow returned a missing downloaded artifact path: {downloaded_path}",
+        )
+    if downloaded_path.is_dir():
+        shutil.copytree(downloaded_path, artifact_dir, dirs_exist_ok=True)
+    else:
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(downloaded_path, artifact_dir / downloaded_path.name)
+    if not (artifact_dir / "MLmodel").is_file():
+        raise DeploymentError(
+            "IMAGE_BUILD_FAILED",
+            f"Resolved MLflow artifact '{model_uri}' does not contain MLmodel at its root.",
+        )
+
+
+def _stage_local_artifact(model_path: str, artifact_dir: Path) -> str:
+    """Copy one validated standalone model file into the shared Docker build context."""
+    source = Path(model_path).expanduser().resolve()
+    if not source.is_file():
+        raise DeploymentError(
+            "IMAGE_BUILD_FAILED",
+            f"Standalone local model file is missing or unreadable: {source}",
+        )
+
+    generated_roots = ((CONTAINER_DIR / "model_artifact").resolve(), (CONTAINER_DIR / ".model_artifact_download").resolve())
+    if any(source == root or root in source.parents for root in generated_roots):
+        raise DeploymentError(
+            "IMAGE_BUILD_FAILED",
+            "LOCAL_MODEL_PATH must not point inside the deployment builder's generated artifact directories.",
+        )
+
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    destination = artifact_dir / source.name
+    shutil.copy2(source, destination)
+    logger.info("Staged standalone local model '%s'", source)
+    return destination.name
 
 
 def build_image(
@@ -128,8 +196,10 @@ def build_image(
     platform: str | None = None,
     push: bool = True,
     image_name: str | None = None,
+    source_type: str = "mlflow",
+    model_format: str = "mlflow",
 ) -> str:
-    """Download the MLflow artifact, build the serving image, and optionally push it."""
+    """Stage the resolved model, build its serving image, and optionally push it."""
     enable_prometheus_metrics = prometheus_metrics_enabled_for_target(target)
     tag = image_tag(image_name or model_name, version, docker_registry)
     artifact_dir = CONTAINER_DIR / "model_artifact"
@@ -138,32 +208,17 @@ def build_image(
     shutil.rmtree(download_dir, ignore_errors=True)
     download_dir.mkdir(parents=True, exist_ok=True)
     stage = "IMAGE_BUILD_FAILED"
+    model_file: str | None = None
 
     try:
-        try:
-            import mlflow
-        except ImportError as exc:
-            raise DeploymentError("IMAGE_BUILD_FAILED", "MLflow is not installed") from exc
-
-        logger.info("Downloading resolved MLflow artifact '%s'", model_uri)
-        downloaded = mlflow.artifacts.download_artifacts(
-            artifact_uri=model_uri, dst_path=str(download_dir)
-        )
-        downloaded_path = Path(downloaded).resolve()
-        if not downloaded_path.exists():
-            raise DeploymentError(
-                "IMAGE_BUILD_FAILED",
-                f"MLflow returned a missing downloaded artifact path: {downloaded_path}",
-            )
-        if downloaded_path.is_dir():
-            shutil.copytree(downloaded_path, artifact_dir, dirs_exist_ok=True)
+        if source_type == "mlflow":
+            _stage_mlflow_artifact(model_uri, artifact_dir, download_dir)
+        elif source_type == "local":
+            model_file = _stage_local_artifact(model_uri, artifact_dir)
         else:
-            artifact_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(downloaded_path, artifact_dir / downloaded_path.name)
-        if not (artifact_dir / "MLmodel").is_file():
             raise DeploymentError(
                 "IMAGE_BUILD_FAILED",
-                f"Resolved MLflow artifact '{model_uri}' does not contain MLmodel at its root.",
+                f"Unsupported model source type for image preparation: {source_type!r}",
             )
 
         build_env = os.environ.copy()
@@ -174,11 +229,16 @@ def build_image(
             version,
             target,
             platform=platform,
+            source_type=source_type,
+            model_format=model_format,
+            model_file=model_file,
         )
         logger.info(
-            "Building Docker image '%s'%s (prometheus_metrics=%s)",
+            "Building Docker image '%s'%s (model_source=%s model_format=%s prometheus_metrics=%s)",
             tag,
             f" for platform {platform}" if platform else " using Docker host/default platform",
+            source_type,
+            model_format,
             "enabled" if enable_prometheus_metrics else "disabled",
         )
         subprocess.run(command, check=True, env=build_env)

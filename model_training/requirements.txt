@@ -1,0 +1,10 @@
+# Python dependencies used by the model-training and MLflow-registration code.
+mlflow>=3,<4
+python-dotenv>=1,<2
+PyYAML>=6,<7
+numpy>=1.26,<2.3
+tensorflow>=2.20,<2.22
+scikit-learn>=1.4,<2
+matplotlib>=3.8,<4
+seaborn>=0.13,<1
+pillow>=10,<13

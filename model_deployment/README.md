@@ -1,22 +1,30 @@
 # Model Deployment
 
-This folder deploys an already registered MLflow model through one common workflow.
-Supported environments are **AWS SageMaker**, **Kubernetes/KServe**, and **Docker Compose**.
+This folder deploys a model through one common workflow to **AWS SageMaker**, **Kubernetes/KServe**, or **Docker Compose**.
+
+The deployment source can be either:
+
+- an existing **MLflow registered model** (the original/default workflow), or
+- one supported **standalone local model file** configured with `LOCAL_MODEL_PATH`.
+
+When `LOCAL_MODEL_PATH` is set, MLflow tracking/registry resolution is skipped completely. The local model is fingerprinted, packaged into the same serving image workflow, and then passed to the existing deployment backend.
 
 ## 1. File Structure
 
 ```text
-deploy.py                                 # Repository-level deployment command
-.env.example                              # Runtime configuration
 model_deployment/
+├── deploy.py                             # Deployment command
+├── .env.example                          # Deployment-only runtime configuration
+├── requirements.txt                      # Deployment-host dependencies
 ├── main.py                               # Common deployment workflow
 ├── config.py                             # Reads and validates deployment settings
 ├── core.py                               # Shared data classes, errors, and naming helpers
 ├── champion.py                           # Resolves the MLflow version or champion alias
+├── local_model.py                         # Validates/fingerprints supported standalone model files
 ├── teardown.py                           # Teardown only the selected deployment resources
 ├── container/
 │   ├── Dockerfile                        # Shared model-serving image
-│   └── containerize.py                   # Downloads the model, builds, and pushes images
+│   └── containerize.py                   # Stages MLflow/local artifacts, builds, and pushes images
 ├── deployments/
 │   ├── __init__.py                       # Deployment backend package
 │   ├── sagemaker/                        # SageMaker endpoint deployment
@@ -44,35 +52,87 @@ model_deployment/
 ├── serving/
 │   ├── app.py                            # FastAPI serving endpoints
 │   ├── entrypoint.py                     # Start shared model server
-│   ├── inference.py                      # Input handling and model prediction
+│   ├── inference.py                      # Input handling plus MLflow/native model adapters
 │   └── metrics.py                        # Prometheus or no-op metrics
 └── test/                                 # Testing for the endpoint working
 ```
 
 ## 2. `.env` Setup
 
-Create the local configuration file from the example:
+Install only the deployment dependencies and create the deployment-specific environment file:
 
 ```bash
-cp .env.example .env
+python -m pip install -r model_deployment/requirements.txt
+cp model_deployment/.env.example model_deployment/.env
 ```
 
-For every deployment, configure at least:
+`model_deployment/.env` is loaded explicitly by the deployment commands and tests. Training-only variables are kept separately in `model_training/.env`.
+
+Always configure the deployment backend:
 
 ```env
+DEPLOYMENT_BACKEND=<aws_sagemaker|kubernetes|docker_compose>
+```
+
+Then choose **one model-source mode**.
+
+### Option A — Existing MLflow Registry workflow
+
+Leave `LOCAL_MODEL_PATH` empty and configure the existing MLflow values:
+
+```env
+LOCAL_MODEL_PATH=
 TRACKING_URI=sqlite:///mlflow.db
 MODEL_NAME=champion_model
 MODEL_ALIAS=champion
-DEPLOYMENT_BACKEND=<backend>
+MODEL_VERSION=
 ```
 
-Use `MODEL_VERSION` only when an exact registered version should override the alias.
-Configure only the section for the backend you are using. Other backend settings are ignored.
+`MODEL_VERSION` is optional and overrides the alias when an exact registered version is required. The MLflow workflow is unchanged from the original blueprint.
+If the training workflow uses a local SQLite MLflow database, configure `TRACKING_URI` with an absolute path so deployment can resolve the same registry regardless of the shell working directory.
 
-Check the configuration before changing infrastructure:
+### Option B — Standalone local model (no MLflow setup required)
+
+Set `LOCAL_MODEL_PATH` to one supported model file:
+
+```env
+LOCAL_MODEL_PATH=/absolute/path/to/model.onnx
+LOCAL_MODEL_NAME=                      # optional; defaults to the filename stem
+LOCAL_MODEL_FORMAT=auto                # normally keep auto
+```
+
+When `LOCAL_MODEL_PATH` is non-empty, it takes precedence over `TRACKING_URI`, `MODEL_NAME`, `MODEL_ALIAS`, and `MODEL_VERSION` for deployment. The file is hashed with SHA-256 and the first 12 hexadecimal characters are used as its deterministic deployment-version identity. Changing the file therefore produces a new local model version without requiring a registry.
+
+Supported standalone formats are:
+
+| Local artifact                                | Runtime/adapter              | Notes                                                                                |
+| --------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------ |
+| `.keras`                                      | TensorFlow/Keras             | Native Keras model                                                                   |
+| `.h5`, `.hdf5`                                | TensorFlow/Keras             | HDF5 Keras model                                                                     |
+| `.onnx`                                       | ONNX Runtime                 | CPU execution provider in the shared server                                          |
+| `.joblib`                                     | joblib / scikit-learn        | Loaded object must expose `predict()`                                                |
+| `.pkl`, `.pickle`                             | joblib/pickle + scikit-learn | Loaded object must expose `predict()`; trusted files only                            |
+| `.pt`, `.pth`                                 | PyTorch                      | TorchScript or serialized full module; state-dict-only checkpoints are not supported |
+| `.tflite`                                     | TensorFlow Lite              | Uses the TensorFlow Lite interpreter                                                 |
+| `.ubj`, `.xgb`, `.xgboost`, `.json`, `.model` | XGBoost                      | Native `Booster.load_model()` artifacts                                              |
+
+For a non-standard XGBoost filename such as `model.bin`, set an explicit override:
+
+```env
+LOCAL_MODEL_PATH=/absolute/path/to/model.bin
+LOCAL_MODEL_FORMAT=xgboost
+```
+
+Accepted explicit `LOCAL_MODEL_FORMAT` values are `keras`, `onnx`, `joblib`, `pickle`, `pytorch`, `tflite`, and `xgboost`. Unsupported formats fail before image deployment.
+
+The local-file mode intentionally supports **model execution**, not automatic reconstruction of arbitrary training code or preprocessing pipelines. The `/predict` request must already match the model's expected input structure/shape. Keras models requiring custom Python layers/objects must have those dependencies available in the serving image; the blueprint does not reconstruct arbitrary custom training code. Serialized pickle/joblib models may require compatible library versions, and `.pt/.pth` state dictionaries cannot be served without the original model architecture. Only load trusted pickle/joblib/PyTorch serialized files. These are explicit portability limitations of standalone-file deployment.
+
+The serving image installs only the runtime required by the selected source/format. A local standalone deployment therefore does not require the MLflow Python runtime or an MLflow server/registry.
+
+Check the resolved plan before changing infrastructure:
 
 ```bash
-python deploy.py --backend <backend> --dry-run
+python model_deployment/deploy.py --backend <backend> --dry-run
 ```
 
 ## 3. Kubernetes / KServe Deployment
@@ -96,7 +156,7 @@ For a private registry, also configure `KUBE_IMAGE_PULL_SECRET` when the cluster
 
 ### Configure
 
-Set the Kubernetes section in `.env`:
+Set the Kubernetes section in `model_deployment/.env`:
 
 ```env
 DEPLOYMENT_BACKEND=kubernetes
@@ -112,8 +172,8 @@ KUBE_DOCKER_PLATFORM=<linux/amd64-or-linux/arm64>
 ### Deploy
 
 ```bash
-python deploy.py --backend kubernetes --dry-run
-python deploy.py --backend kubernetes
+python model_deployment/deploy.py --backend kubernetes --dry-run
+python model_deployment/deploy.py --backend kubernetes
 ```
 
 ### Test
@@ -145,18 +205,34 @@ python model_deployment/test/test_kserve_prometheus.py
 python model_deployment/test/test_kserve_grafana.py
 ```
 
+```bash
+python3 mock_request.py \
+        --backend http \
+        --url http://127.0.0.1:18000/predict \
+        --requests 120 \
+        --interval 0.5
+```
+```bash
+python3 model_deployment/test/mock_request/benchmark_deployment.py \
+  --backend http \
+  --url http://127.0.0.1:18000/predict \
+  --requests 100 \
+  --concurrency 5 \
+  --warmup 5
+```
+
 ## 4. AWS SageMaker Deployment
 
 ### Prerequisites
 
 - Docker is running.
-- AWS credentials are available through `.env` or the host environment.
+- AWS credentials are available through `model_deployment/.env` or the host environment.
 - The SageMaker execution role exists.
 - The configured ECR repository path and AWS region belong together.
 
 ### Configure
 
-Set the AWS section in `.env`, especially:
+Set the AWS section in `model_deployment/.env`, especially:
 
 ```env
 DEPLOYMENT_BACKEND=aws_sagemaker
@@ -174,8 +250,8 @@ Set `AWS_DOCKER_PLATFORM` to the architecture required by the SageMaker instance
 ### Deploy
 
 ```bash
-python deploy.py --backend aws_sagemaker --dry-run
-python deploy.py --backend aws_sagemaker
+python model_deployment/deploy.py --backend aws_sagemaker --dry-run
+python model_deployment/deploy.py --backend aws_sagemaker
 ```
 
 The workflow builds the image, authenticates to ECR, pushes the image, reconciles the SageMaker endpoint, waits for readiness, and configures the CloudWatch latency alarm.
@@ -199,6 +275,24 @@ Optional inference smoke test:
 python model_deployment/test/test_sagemaker.py
 ```
 
+```bash
+python3 mock_request.py \
+        --backend sagemaker \
+        --endpoint-name <sagemaker-endpoint-name> \
+        --region eu-central-1 \
+        --requests 120 \
+        --interval 0.5
+```
+```bash
+python3 model_deployment/test/mock_request/benchmark_deployment.py \
+  --backend sagemaker \
+  --endpoint-name <YOUR_SAGEMAKER_ENDPOINT_NAME> \
+  --region <YOUR_AWS_REGION> \
+  --requests 100 \
+  --concurrency 5 \
+  --warmup 5
+```
+
 ## 5. Docker Compose Deployment
 
 ### Prerequisites
@@ -209,7 +303,7 @@ python model_deployment/test/test_sagemaker.py
 
 ### Configure
 
-Set the Compose section in `.env`, for example:
+Set the Compose section in `model_deployment/.env`, for example:
 
 ```env
 DEPLOYMENT_BACKEND=docker_compose
@@ -235,8 +329,8 @@ For bundled Grafana with external Prometheus, set `COMPOSE_EXTERNAL_PROMETHEUS_U
 ### Deploy
 
 ```bash
-python deploy.py --backend docker_compose --dry-run
-python deploy.py --backend docker_compose
+python model_deployment/deploy.py --backend docker_compose --dry-run
+python model_deployment/deploy.py --backend docker_compose
 ```
 
 ### Test
@@ -254,6 +348,16 @@ Optional smoke test:
 python model_deployment/test/test_docker_compose.py
 ```
 
+```bash
+python3 mock_request.py \
+        --backend http \
+        --url http://127.0.0.1:8000/predict \
+        --requests 120 \
+        --interval 0.5
+```
+
+The example tests default to the thesis validation image under `model_training/data/val/...`. If that dataset is not present on a deployment-only host, set `IMAGE_PATH` in `model_deployment/.env` to any compatible test input.
+
 ## 6. Teardown and Changing Deployment
 
 Teardown is a dry-run by default:
@@ -268,11 +372,13 @@ To actually remove the selected deployment:
 python -m model_deployment.teardown --backend <backend> --execute
 ```
 
+In standalone local-model mode, teardown uses `LOCAL_MODEL_NAME` when configured or otherwise the local model filename stem, matching deployment identity. Kubernetes teardown continues to use `KUBE_DEPLOYMENT_NAME`.
+
 To change backend, model version, ports, resources, or monitoring settings:
 
-1. Update `.env`.
-2. Run `python deploy.py --backend <backend> --dry-run`.
-3. Run `python deploy.py --backend <backend>`.
+1. Update `model_deployment/.env`.
+2. Run `python model_deployment/deploy.py --backend <backend> --dry-run`.
+3. Run `python model_deployment/deploy.py --backend <backend>`.
 4. Teardown the previous deployment only when it is no longer required.
 
 The teardown code is scoped to the selected deployment and does not intentionally remove unrelated infrastructure.

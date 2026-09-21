@@ -4,9 +4,16 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 from typing import Optional, Sequence
 
+from pathlib import Path
 from dotenv import load_dotenv
+
+MODEL_DEPLOYMENT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = MODEL_DEPLOYMENT_ROOT.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from model_deployment import (
     DeploymentError,
@@ -14,11 +21,13 @@ from model_deployment import (
     validate_kubernetes_deployment_name,
 )
 from model_deployment.config import VALID_TARGETS
+from model_deployment.local_model import configured_deployment_model_name
 from model_deployment.deployments.docker_compose import teardown_compose_project
 from model_deployment.deployments.kubernetes import teardown_kserve
 from model_deployment.deployments.sagemaker import teardown_sagemaker
 
 logger = logging.getLogger(__name__)
+
 
 
 def teardown_deployment(
@@ -70,14 +79,15 @@ def teardown_deployment(
 
 def resolve_args(argv: Optional[Sequence[str]] = None):
     """Parse teardown arguments using the same canonical backend names as deployment."""
-    load_dotenv()
+    load_dotenv(MODEL_DEPLOYMENT_ROOT / ".env", override=False)
     parser = argparse.ArgumentParser(
         description="Tear down one exact deployment backend resource set."
     )
     parser.add_argument("--backend", "--target", dest="target", required=True, choices=VALID_TARGETS)
     parser.add_argument(
         "--model-name",
-        default=os.getenv("MODEL_NAME"),
+        default=configured_deployment_model_name(),
+        help="Deployment model identity; defaults to LOCAL_MODEL_NAME/file stem in local mode or MODEL_NAME in MLflow mode",
     )
     parser.add_argument(
         "--execute",

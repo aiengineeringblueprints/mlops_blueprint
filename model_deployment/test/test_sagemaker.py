@@ -16,17 +16,20 @@ from dotenv import load_dotenv
 from PIL import Image
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+PROJECT_ROOT = HERE.parents[1]
+DEPLOYMENT_ROOT = PROJECT_ROOT / "model_deployment"
+TRAINING_ROOT = PROJECT_ROOT / "model_training"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from model_deployment import stable_deployment_name
+from model_deployment.local_model import configured_deployment_model_name
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 IMAGE_SIZE = (224, 224)
-DEFAULT_IMAGE = REPO_ROOT / "data" / "val" / "Standard-Schraube" / "IMG_8059.JPG"
+DEFAULT_IMAGE = TRAINING_ROOT / "data" / "val" / "Standard-Schraube" / "IMG_8059.JPG"
 CLASS_NAMES = [
     "Schraube-Zylinder_ganz",
     "Schraube-Zylinder_oben",
@@ -64,8 +67,8 @@ def predict(client, endpoint_name, batch):
 
 def main():
     """Run one SageMaker inference smoke test."""
-    load_dotenv(REPO_ROOT / ".env", override=False)
-    model_name = os.getenv("MODEL_NAME", "champion_model")
+    load_dotenv(DEPLOYMENT_ROOT / ".env", override=False)
+    model_name = configured_deployment_model_name("champion_model") or "champion_model"
     endpoint_name = os.getenv("ENDPOINT_NAME", stable_deployment_name(model_name, "aws_sagemaker"))
     image_path = Path(os.getenv("IMAGE_PATH", DEFAULT_IMAGE))
     if not image_path.is_file():

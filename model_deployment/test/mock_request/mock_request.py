@@ -61,20 +61,20 @@ CLASS_NAMES = [
 ]
 
 
-def find_repo_root(start: Path) -> Path:
-    """Find the repository root containing data/ and deploy.py."""
+def find_project_root(start: Path) -> Path:
+    """Locate the repository root from the split training/deployment structure."""
     for candidate in (start, *start.parents):
-        if (candidate / "deploy.py").is_file():
+        if (candidate / "model_deployment").is_dir() and (candidate / "model_training").is_dir():
             return candidate
-
-    return start
+    raise RuntimeError("Could not locate repository root containing model_training/ and model_deployment/")
 
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = find_repo_root(HERE)
+PROJECT_ROOT = find_project_root(HERE)
+TRAINING_ROOT = PROJECT_ROOT / "model_training"
 
 DEFAULT_IMAGE = (
-    REPO_ROOT
+    TRAINING_ROOT
     / "data"
     / "val"
     / "Standard-Schraube"

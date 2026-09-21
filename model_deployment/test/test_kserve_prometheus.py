@@ -13,6 +13,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -21,14 +22,21 @@ logger = logging.getLogger(__name__)
 
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parents[1]
-load_dotenv(REPO_ROOT / ".env", override=False)
+PROJECT_ROOT = HERE.parents[1]
+DEPLOYMENT_ROOT = PROJECT_ROOT / "model_deployment"
+TRAINING_ROOT = PROJECT_ROOT / "model_training"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from model_deployment.local_model import configured_deployment_model_name
+
+load_dotenv(DEPLOYMENT_ROOT / ".env", override=False)
 
 # Port-forward Prometheus to 19090, or override TEST_PROMETHEUS_URL.
 PROMETHEUS_BASE_URL = os.getenv("TEST_PROMETHEUS_URL", "http://127.0.0.1:19090").rstrip("/")
 
 EXPECTED_NAMESPACE = os.getenv("KUBE_NAMESPACE", "mlops")
-EXPECTED_MODEL = os.getenv("MODEL_NAME", "champion_model")
+EXPECTED_MODEL = configured_deployment_model_name("champion_model") or "champion_model"
 KUBE_DEPLOYMENT_NAME = os.getenv("KUBE_DEPLOYMENT_NAME", "champion-model")
 EXPECTED_JOB_FRAGMENT = os.getenv(
     "TEST_PODMONITOR_NAME", f"{KUBE_DEPLOYMENT_NAME}-inference-monitor"

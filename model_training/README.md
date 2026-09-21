@@ -2,6 +2,31 @@
 
 This repository serves as a reference for using LakeFS and MLflow. As an application example, a model for image-based anomaly detection is trained. Due to limited storage capacity, this repository contains only a small amount of sample data. To access the complete dataset, please contact Tobias Saur.
 
+
+## Local Training Environment
+
+Training is self-contained under `model_training/`. Install only its dependencies and create its own environment file from the repository root:
+
+```bash
+python -m pip install -r model_training/requirements.txt
+cp model_training/.env.example model_training/.env
+```
+
+The training scripts load `model_training/.env` explicitly. Training data and generated `model/` and `metrics/` outputs are resolved relative to the `model_training/` directory, so the scripts can be launched from the repository root.
+`mc` and `lakectl` are external command-line prerequisites for the LakeFS/MinIO helper scripts; they are not installed by `model_training/requirements.txt`.
+
+Typical commands are:
+
+```bash
+python model_training/setup_lakefs.py
+python model_training/prepare_lakefs_branch.py
+python model_training/data_augmentation.py
+python model_training/train.py
+python model_training/mlflow_registry.py
+```
+
+The manual LakeFS shell commands in the sections below assume `cd model_training` first, because they use the relative `data/` path.
+
 ## Infrastructure Setup
 
 Follow steps 0 and 1 from https://github.com/aiengineeringblueprints/lakefs_demo to set up LakeFS and MinIO.
@@ -106,6 +131,6 @@ lakectl local checkout data
 
 If you want to deploy registered MLflow model, follow the dedicated deployment guide:
 
-[`model_deployment/README.md`](model_deployment/README.md)
+[`model_deployment/README.md`](../model_deployment/README.md)
 
 It contains the `.env` setup, Kubernetes/KServe, AWS SageMaker, Docker Compose, testing, and teardown steps.

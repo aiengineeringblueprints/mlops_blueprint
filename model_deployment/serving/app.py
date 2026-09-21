@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 MODEL_PATH = os.environ.get("MODEL_PATH", "/app/model_artifact")
 MODEL_NAME = os.environ.get("MODEL_NAME", "model")
 MODEL_VERSION = os.environ.get("MODEL_VERSION", "0")
+MODEL_SOURCE = os.environ.get("MODEL_SOURCE", "mlflow")
+MODEL_FORMAT = os.environ.get("MODEL_FORMAT", "mlflow")
+MODEL_FILE = os.environ.get("MODEL_FILE") or None
 LABELS = {"model": MODEL_NAME, "version": MODEL_VERSION}
 METRICS = create_metrics()
 
@@ -31,9 +34,19 @@ app = FastAPI(title=f"Model Server: {MODEL_NAME}")
 
 try:
     logger.info(
-        "Loading model '%s' (v%s) from %s", MODEL_NAME, MODEL_VERSION, MODEL_PATH
+        "Loading model '%s' (v%s) source=%s format=%s from %s",
+        MODEL_NAME,
+        MODEL_VERSION,
+        MODEL_SOURCE,
+        MODEL_FORMAT,
+        MODEL_PATH,
     )
-    MODEL = load_serving_model(MODEL_PATH)
+    MODEL = load_serving_model(
+        MODEL_PATH,
+        model_source=MODEL_SOURCE,
+        model_format=MODEL_FORMAT,
+        model_file=MODEL_FILE,
+    )
     METRICS.model_up.labels(**LABELS).set(1)
 except Exception:
     METRICS.model_up.labels(**LABELS).set(0)
@@ -81,7 +94,13 @@ async def handle_prediction_request(
 @app.get("/ping")
 def health():
     """Return model-server liveness information."""
-    return {"status": "ok", "model": MODEL_NAME, "version": MODEL_VERSION}
+    return {
+        "status": "ok",
+        "model": MODEL_NAME,
+        "version": MODEL_VERSION,
+        "source": MODEL_SOURCE,
+        "format": MODEL_FORMAT,
+    }
 
 
 @app.get("/v1/models")
