@@ -206,12 +206,13 @@ python model_deployment/test/test_kserve_grafana.py
 ```
 
 ```bash
-python3 mock_request.py \
+python3 model_deployment/test/mock_request/mock_request.py \
         --backend http \
         --url http://127.0.0.1:18000/predict \
         --requests 120 \
         --interval 0.5
 ```
+
 ```bash
 python3 model_deployment/test/mock_request/benchmark_deployment.py \
   --backend http \
@@ -276,13 +277,14 @@ python model_deployment/test/test_sagemaker.py
 ```
 
 ```bash
-python3 mock_request.py \
+python3 model_deployment/test/mock_request/mock_request.py \
         --backend sagemaker \
         --endpoint-name <sagemaker-endpoint-name> \
         --region eu-central-1 \
         --requests 120 \
         --interval 0.5
 ```
+
 ```bash
 python3 model_deployment/test/mock_request/benchmark_deployment.py \
   --backend sagemaker \
@@ -349,7 +351,7 @@ python model_deployment/test/test_docker_compose.py
 ```
 
 ```bash
-python3 mock_request.py \
+python3 model_deployment/test/mock_request/mock_request.py \
         --backend http \
         --url http://127.0.0.1:8000/predict \
         --requests 120 \
