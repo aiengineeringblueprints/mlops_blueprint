@@ -117,8 +117,7 @@ def build_docker_command(
             f"ENABLE_PROMETHEUS_METRICS={'true' if enable_prometheus_metrics else 'false'}",
         ]
     )
-    # Keep the original MLflow command stable. Extra build arguments are required only
-    # for standalone local files.
+
     if source_type != "mlflow" or model_format != "mlflow" or model_file:
         command.extend(
             [
