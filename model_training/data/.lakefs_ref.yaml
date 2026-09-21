@@ -1,0 +1,3 @@
+src: lakefs://anomaly-detection-data/augmented/data/
+at_head: 0a977779b13d27cca6ef74a90a1df3eb09736783c0908bf78eec333fbb940843
+active_operation: ""
