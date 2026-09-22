@@ -1,265 +1,390 @@
 # Model Deployment
 
-This folder deploys a model through one common workflow to **AWS SageMaker**, **Kubernetes/KServe**, or **Docker Compose**.
+This folder implements the deployment part of the MLOps blueprint. It uses one common workflow to deploy a resolved model to **AWS SageMaker**, **Kubernetes/KServe**, or **Docker Compose**.
 
-The deployment source can be either:
+The model source can be either:
 
-- an existing **MLflow registered model** (the original/default workflow), or
+- an existing **MLflow registered model**, or
 - one supported **standalone local model file** configured with `LOCAL_MODEL_PATH`.
 
-When `LOCAL_MODEL_PATH` is set, MLflow tracking/registry resolution is skipped completely. The local model is fingerprinted, packaged into the same serving image workflow, and then passed to the existing deployment backend.
+When `LOCAL_MODEL_PATH` is set, MLflow resolution is skipped. The local file is fingerprinted and passed through the same image-preparation and backend deployment workflow.
 
-## 1. File Structure
+> `model_deployment/.env.example` and this README are intended to be version-controlled. Keep real credentials and host-specific values in `model_deployment/.env`; `.env` is ignored by Git.
 
-```text
-model_deployment/
-├── deploy.py                             # Deployment command
-├── .env.example                          # Deployment-only runtime configuration
-├── requirements.txt                      # Deployment-host dependencies
-├── main.py                               # Common deployment workflow
-├── config.py                             # Reads and validates deployment settings
-├── core.py                               # Shared data classes, errors, and naming helpers
-├── champion.py                           # Resolves the MLflow version or champion alias
-├── local_model.py                         # Validates/fingerprints supported standalone model files
-├── teardown.py                           # Teardown only the selected deployment resources
-├── container/
-│   ├── Dockerfile                        # Shared model-serving image
-│   └── containerize.py                   # Stages MLflow/local artifacts, builds, and pushes images
-├── deployments/
-│   ├── __init__.py                       # Deployment backend package
-│   ├── sagemaker/                        # SageMaker endpoint deployment
-│   │   ├── __init__.py                   # SageMaker backend package
-│   │   ├── adapter.py                    # Connects the common workflow to SageMaker
-│   │   └── helpers.py                    # Creates, reuses, and checks SageMaker resources
-│   ├── kubernetes/                       # Kubernetes/KServe deployment
-│   │   ├── __init__.py                   # Kubernetes backend package
-│   │   ├── adapter.py                    # Connects the common workflow to KServe
-│   │   ├── helpers.py                    # Deploys and checks KServe resources
-│   │   └── templates/                    # Kubernetes manifest templates
-│   │       ├── inferenceservice.yaml.j2  # KServe InferenceService template
-│   │       └── podmonitor.yaml.j2        # Prometheus PodMonitor template
-│   └── docker_compose/                   # Single-host Docker Compose deployment
-│       ├── __init__.py                   # Docker Compose backend package
-│       ├── adapter.py                    # Connects the common workflow to Docker Compose
-│       ├── helpers.py                    # Renders, starts, and checks Compose services
-│       └── templates/                    # Docker Compose configuration templates
-│           ├── compose.yaml.j2           # Model, Prometheus, and Grafana services
-│           └── prometheus.yml.j2         # Prometheus scrape configuration
-├── monitoring/
-│   ├── cloudwatch.py                     # SageMaker CloudWatch alarm
-│   ├── prometheus.py                     # Prometheus target checks
-│   └── grafana/                          # Reusable Grafana dashboard
-├── serving/
-│   ├── app.py                            # FastAPI serving endpoints
-│   ├── entrypoint.py                     # Start shared model server
-│   ├── inference.py                      # Input handling plus MLflow/native model adapters
-│   └── metrics.py                        # Prometheus or no-op metrics
-└── test/                                 # Testing for the endpoint working
-```
+---
 
-## 2. `.env` Setup
+## 1. Prerequisites
 
-Install only the deployment dependencies and create the deployment-specific environment file:
+Install these on the deployment host before starting:
+
+- **Git**
+- **Python 3.10+**
+- **Docker**
+- **Docker Compose v2** (`docker compose`)
+
+Verify the basic tools:
 
 ```bash
-python -m pip install -r model_deployment/requirements.txt
+git --version
+python3 --version
+docker --version
+docker compose version
+```
+
+Docker must also be running:
+
+```bash
+docker info
+```
+
+Additional prerequisites depend on the selected backend and are listed under Step 5.
+
+---
+
+## 2. Clone the Repository and Create a Python Environment
+
+Clone the repository and enter its root directory:
+
+```bash
+git clone <repository-url>
+cd <repository-directory>
+```
+
+Create and activate a virtual environment.
+
+Linux/macOS:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Windows PowerShell:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Install the deployment-host dependencies:
+
+```bash
+python -m pip install --upgrade pip
+pip install -r model_deployment/requirements.txt
+```
+
+### Optional: use `uv`
+
+`uv` can be used instead of `pip` for faster environment creation and dependency installation. It is optional; the blueprint does not depend on it.
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install -r model_deployment/requirements.txt
+```
+
+---
+
+## 3. Create the Deployment Configuration
+
+Copy the example configuration:
+
+Linux/macOS:
+
+```bash
 cp model_deployment/.env.example model_deployment/.env
 ```
 
-`model_deployment/.env` is loaded explicitly by the deployment commands and tests. Training-only variables are kept separately in `model_training/.env`.
+Windows PowerShell:
 
-Always configure the deployment backend:
-
-```env
-DEPLOYMENT_BACKEND=<aws_sagemaker|kubernetes|docker_compose>
+```powershell
+Copy-Item model_deployment/.env.example model_deployment/.env
 ```
 
-Then choose **one model-source mode**.
+The deployment code loads `model_deployment/.env`. Explicit environment variables already defined in the host process take precedence over values from the file.
 
-### Option A — Existing MLflow Registry workflow
+### Required Docker platform
 
-Leave `LOCAL_MODEL_PATH` empty and configure the existing MLflow values:
+Each backend now requires its own Docker platform variable when that backend is selected:
+
+- AWS SageMaker: `AWS_DOCKER_PLATFORM`
+- Kubernetes/KServe: `KUBE_DOCKER_PLATFORM`
+- Docker Compose: `COMPOSE_DOCKER_PLATFORM`
+
+Common Docker platform values include:
+
+```text
+linux/amd64
+linux/arm64
+linux/arm/v7
+linux/arm/v6
+linux/386
+```
+
+Select the platform that matches the target runtime. Useful checks are:
+
+```bash
+uname -m
+docker info --format '{{.Architecture}}'
+```
+
+Typical mappings are:
+
+```text
+x86_64 / amd64   -> linux/amd64
+aarch64 / arm64  -> linux/arm64
+armv7l            -> linux/arm/v7
+```
+
+For SageMaker, the selected platform must also be supported by the configured SageMaker instance type.
+
+---
+
+## 4. Choose the Model Source
+
+Choose **one** source mode in `model_deployment/.env`.
+
+### 4.1 MLflow Registry source
+
+Leave `LOCAL_MODEL_PATH` empty and configure the registry source:
 
 ```env
 LOCAL_MODEL_PATH=
-TRACKING_URI=sqlite:///mlflow.db
+TRACKING_URI=sqlite:////absolute/path/to/model_training/mlflow.db
 MODEL_NAME=champion_model
 MODEL_ALIAS=champion
 MODEL_VERSION=
 ```
 
-`MODEL_VERSION` is optional and overrides the alias when an exact registered version is required. The MLflow workflow is unchanged from the original blueprint.
-If the training workflow uses a local SQLite MLflow database, configure `TRACKING_URI` with an absolute path so deployment can resolve the same registry regardless of the shell working directory.
+`MODEL_VERSION` is optional. When it is empty, the blueprint resolves `MODEL_ALIAS` and validates champion provenance. When an explicit version is supplied, that exact registered version is used.
 
-### Option B — Standalone local model (no MLflow setup required)
-
-Set `LOCAL_MODEL_PATH` to one supported model file:
+If MLflow stores artifacts in an S3-compatible service such as MinIO, also set:
 
 ```env
-LOCAL_MODEL_PATH=/absolute/path/to/model.onnx
-LOCAL_MODEL_NAME=                      # optional; defaults to the filename stem
-LOCAL_MODEL_FORMAT=auto                # normally keep auto
+MLFLOW_S3_ENDPOINT_URL=http://<host>:<port>
 ```
 
-When `LOCAL_MODEL_PATH` is non-empty, it takes precedence over `TRACKING_URI`, `MODEL_NAME`, `MODEL_ALIAS`, and `MODEL_VERSION` for deployment. The file is hashed with SHA-256 and the first 12 hexadecimal characters are used as its deterministic deployment-version identity. Changing the file therefore produces a new local model version without requiring a registry.
+### 4.2 Standalone local model source
+
+Set an absolute path to one supported model file:
+
+```env
+LOCAL_MODEL_PATH=/absolute/path/to/model.keras
+LOCAL_MODEL_NAME=
+LOCAL_MODEL_FORMAT=auto
+```
+
+`LOCAL_MODEL_PATH` takes precedence over MLflow configuration. `LOCAL_MODEL_NAME` is optional and defaults to the file stem. `LOCAL_MODEL_FORMAT=auto` detects the format from the extension.
 
 Supported standalone formats are:
 
-| Local artifact                                | Runtime/adapter              | Notes                                                                                |
-| --------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------ |
-| `.keras`                                      | TensorFlow/Keras             | Native Keras model                                                                   |
-| `.h5`, `.hdf5`                                | TensorFlow/Keras             | HDF5 Keras model                                                                     |
-| `.onnx`                                       | ONNX Runtime                 | CPU execution provider in the shared server                                          |
-| `.joblib`                                     | joblib / scikit-learn        | Loaded object must expose `predict()`                                                |
-| `.pkl`, `.pickle`                             | joblib/pickle + scikit-learn | Loaded object must expose `predict()`; trusted files only                            |
-| `.pt`, `.pth`                                 | PyTorch                      | TorchScript or serialized full module; state-dict-only checkpoints are not supported |
-| `.tflite`                                     | TensorFlow Lite              | Uses the TensorFlow Lite interpreter                                                 |
-| `.ubj`, `.xgb`, `.xgboost`, `.json`, `.model` | XGBoost                      | Native `Booster.load_model()` artifacts                                              |
+| Artifact | Runtime / adapter | Important limitation |
+| --- | --- | --- |
+| `.keras`, `.h5`, `.hdf5` | TensorFlow/Keras | Custom layers must be available in the serving image |
+| `.onnx` | ONNX Runtime | CPU execution provider |
+| `.joblib` | joblib/scikit-learn | Loaded object must expose `predict()` |
+| `.pkl`, `.pickle` | pickle/joblib | Trusted files only; compatible libraries required |
+| `.pt`, `.pth` | PyTorch | TorchScript/full module supported; state-dict-only checkpoints are not |
+| `.tflite` | TensorFlow Lite | Uses the TFLite interpreter |
+| `.ubj`, `.xgb`, `.xgboost`, `.json`, `.model` | XGBoost | Loaded using `Booster.load_model()` |
 
-For a non-standard XGBoost filename such as `model.bin`, set an explicit override:
+For a non-standard filename, set the format explicitly, for example:
 
 ```env
 LOCAL_MODEL_PATH=/absolute/path/to/model.bin
 LOCAL_MODEL_FORMAT=xgboost
 ```
 
-Accepted explicit `LOCAL_MODEL_FORMAT` values are `keras`, `onnx`, `joblib`, `pickle`, `pytorch`, `tflite`, and `xgboost`. Unsupported formats fail before image deployment.
+The local-model mode executes the supplied model artifact; it does not reconstruct arbitrary preprocessing or training code.
 
-The local-file mode intentionally supports **model execution**, not automatic reconstruction of arbitrary training code or preprocessing pipelines. The `/predict` request must already match the model's expected input structure/shape. Keras models requiring custom Python layers/objects must have those dependencies available in the serving image; the blueprint does not reconstruct arbitrary custom training code. Serialized pickle/joblib models may require compatible library versions, and `.pt/.pth` state dictionaries cannot be served without the original model architecture. Only load trusted pickle/joblib/PyTorch serialized files. These are explicit portability limitations of standalone-file deployment.
+---
 
-The serving image installs only the runtime required by the selected source/format. A local standalone deployment therefore does not require the MLflow Python runtime or an MLflow server/registry.
+## 5. Choose One Deployment Backend
 
-Check the resolved plan before changing infrastructure:
+Set `DEPLOYMENT_BACKEND` to exactly one of:
 
-```bash
-python model_deployment/deploy.py --backend <backend> --dry-run
+```env
+DEPLOYMENT_BACKEND=aws_sagemaker | kubernetes | docker_compose
 ```
 
-## 3. Kubernetes / KServe Deployment
+Then follow only the matching subsection below.
 
-### Prerequisites
+### 5.1 AWS SageMaker
 
-- Docker is running on the deployment host.
-- `kubectl` can access the target cluster through `KUBE_CONTEXT`.
-- KServe is installed.
-- The target namespace already exists.
-- The cluster can pull the image from `KUBE_DOCKER_REGISTRY`.
-- Prometheus Operator/`PodMonitor` is available when Prometheus monitoring is used.
+#### Additional prerequisites
 
-`KUBE_DOCKER_REGISTRY` only defines the image destination. Authenticate the deployment host separately, for example:
+- An AWS account and credentials with the required ECR/SageMaker permissions
+- A SageMaker execution role
+- An ECR repository path in the same region used by the deployment
+
+The AWS CLI is useful for manual verification but the blueprint itself uses `boto3`.
+
+#### Required and important variables
+
+| Variable | Purpose |
+| --- | --- |
+| `AWS_REGION` | Region for ECR, SageMaker, and CloudWatch |
+| `AWS_DOCKER_REGISTRY` | ECR repository used for the deployment image |
+| `AWS_DOCKER_PLATFORM` | **Required** target image platform |
+| `SAGEMAKER_ROLE_ARN` | SageMaker execution role |
+| `SAGEMAKER_INSTANCE_TYPE` | Inference instance type |
+| `SAGEMAKER_INSTANCE_COUNT` | Number of inference instances |
+| `SAGEMAKER_VARIANT_NAME` | SageMaker production variant name |
+| `SAGEMAKER_LATENCY_THRESHOLD_US` | CloudWatch latency-alarm threshold |
+| `SAGEMAKER_ALARM_PERIOD` | CloudWatch alarm period |
+| `SAGEMAKER_EVALUATION_PERIODS` | Number of alarm evaluation periods |
+
+Example:
+
+```env
+DEPLOYMENT_BACKEND=aws_sagemaker
+AWS_REGION=eu-central-1
+AWS_DOCKER_REGISTRY=<account>.dkr.ecr.eu-central-1.amazonaws.com/mlops-blueprint
+AWS_DOCKER_PLATFORM=linux/amd64
+SAGEMAKER_ROLE_ARN=<role-arn>
+SAGEMAKER_INSTANCE_TYPE=ml.m5.xlarge
+SAGEMAKER_INSTANCE_COUNT=1
+```
+
+Credentials can be supplied through the normal AWS provider chain or through the corresponding variables in `model_deployment/.env`.
+
+### 5.2 Kubernetes / KServe
+
+#### Additional prerequisites
+
+- `kubectl`
+- Access to the target cluster through the configured kubeconfig context
+- KServe installed
+- Target namespace already created
+- Prometheus Operator/`PodMonitor` available for the blueprint's Prometheus integration
+- A container registry reachable by the deployment host and the cluster
+
+Authenticate the deployment host separately before pushing, for example:
 
 ```bash
 docker login <registry-host>
 ```
 
-For a private registry, also configure `KUBE_IMAGE_PULL_SECRET` when the cluster needs pull credentials.
+A private image repository may additionally require `KUBE_IMAGE_PULL_SECRET` so the cluster can pull the image.
 
-### Configure
+#### Required and important variables
 
-Set the Kubernetes section in `model_deployment/.env`:
+| Variable | Purpose |
+| --- | --- |
+| `KUBE_CONTEXT` | kubeconfig context selecting the cluster |
+| `KUBE_NAMESPACE` | Namespace for deployment resources |
+| `KUBE_DEPLOYMENT_NAME` | Stable KServe/Kubernetes deployment name |
+| `KUBE_DOCKER_REGISTRY` | Registry/repository prefix for the image |
+| `KUBE_DOCKER_PLATFORM` | **Required** target image platform |
+| `KUBE_CPU_REQUEST`, `KUBE_MEM_REQUEST` | Predictor resource requests |
+| `KUBE_CPU_LIMIT`, `KUBE_MEM_LIMIT` | Predictor resource limits |
+| `KUBE_MIN_REPLICAS`, `KUBE_MAX_REPLICAS` | Replica bounds |
+| `KUBE_KSERVE_DEPLOYMENT_MODE` | KServe mode (`Standard`, `Knative`, or `ModelMesh`) |
+| `KUBE_IMAGE_PULL_POLICY` | Kubernetes image pull policy |
+| `KUBE_SCRAPE_INTERVAL` | PodMonitor scrape interval |
+| `KUBE_PROMETHEUS_RELEASE_LABEL` | Prometheus Operator release label |
+| `KUBE_PROMETHEUS_URL` | Optional URL for automatic target verification |
+| `KUBE_NODE_SELECTOR_JSON` | Optional node selector, e.g. ARM64 nodes |
+| `KUBE_EXTRA_RESOURCE_LIMITS_JSON` | Optional extra resource limits such as GPU |
+| `KUBE_RUNTIME_CLASS` | Optional RuntimeClass |
+
+Example for an ARM64 node:
 
 ```env
 DEPLOYMENT_BACKEND=kubernetes
 KUBE_CONTEXT=<context>
 KUBE_NAMESPACE=mlops
 KUBE_DEPLOYMENT_NAME=champion-model
-KUBE_DOCKER_REGISTRY=<registry>/<repository-prefix>
-KUBE_DOCKER_PLATFORM=<linux/amd64-or-linux/arm64>
+KUBE_DOCKER_REGISTRY=docker.io/<username>
+KUBE_DOCKER_PLATFORM=linux/arm64
+KUBE_CPU_REQUEST=250m
+KUBE_MEM_REQUEST=512Mi
+KUBE_CPU_LIMIT=1
+KUBE_MEM_LIMIT=1Gi
+KUBE_MIN_REPLICAS=1
+KUBE_MAX_REPLICAS=1
 ```
 
-`KUBE_DEPLOYMENT_NAME` must already be a valid lowercase Kubernetes name. It is not silently rewritten.
+`KUBE_DEPLOYMENT_NAME` is validated rather than silently rewritten. Use lowercase letters, numbers, and hyphens only.
 
-### Deploy
+### 5.3 Docker Compose
 
-```bash
-python model_deployment/deploy.py --backend kubernetes --dry-run
-python model_deployment/deploy.py --backend kubernetes
-```
+#### Additional prerequisites
 
-### Test
+No backend-specific software is required beyond Docker and Docker Compose v2. The configured host ports must be free.
 
-Check the deployed KServe resources:
+#### Required and important variables
 
-```bash
-kubectl --context <context> -n <namespace> get inferenceservice,podmonitor
-```
+| Variable | Purpose |
+| --- | --- |
+| `COMPOSE_DOCKER_PLATFORM` | **Required** target image platform |
+| `COMPOSE_PROJECT_NAME` | Optional project name; otherwise derived from the model name |
+| `COMPOSE_MODEL_PORT` | Host port for `/health`, `/predict`, and `/metrics` |
+| `COMPOSE_ENABLE_PROMETHEUS` | Start bundled Prometheus; **defaults to `false`** |
+| `COMPOSE_PROMETHEUS_PORT` | Host port for bundled Prometheus |
+| `COMPOSE_ENABLE_GRAFANA` | Start bundled Grafana; **defaults to `false`** |
+| `COMPOSE_GRAFANA_PORT` | Host port for bundled Grafana |
+| `COMPOSE_EXTERNAL_PROMETHEUS_URL` | Required only for bundled Grafana with external Prometheus |
 
-Port-forward the predictor service:
-
-```bash
-kubectl --context <context> -n <namespace> port-forward svc/<deployment-name>-inference-predictor 18000:80
-```
-
-Then check health:
-
-```bash
-curl http://127.0.0.1:18000/health
-```
-
-Optional smoke tests:
-
-```bash
-python model_deployment/test/test_kserve.py
-python model_deployment/test/test_kserve_monitoring.py
-python model_deployment/test/test_kserve_prometheus.py
-python model_deployment/test/test_kserve_grafana.py
-```
-
-```bash
-python3 model_deployment/test/mock_request/mock_request.py \
-        --backend http \
-        --url http://127.0.0.1:18000/predict \
-        --requests 120 \
-        --interval 0.5
-```
-
-```bash
-python3 model_deployment/test/mock_request/benchmark_deployment.py \
-  --backend http \
-  --url http://127.0.0.1:18000/predict \
-  --requests 100 \
-  --concurrency 5 \
-  --warmup 5
-```
-
-## 4. AWS SageMaker Deployment
-
-### Prerequisites
-
-- Docker is running.
-- AWS credentials are available through `model_deployment/.env` or the host environment.
-- The SageMaker execution role exists.
-- The configured ECR repository path and AWS region belong together.
-
-### Configure
-
-Set the AWS section in `model_deployment/.env`, especially:
+Minimal model-only example:
 
 ```env
-DEPLOYMENT_BACKEND=aws_sagemaker
-AWS_ACCESS_KEY_ID=<ACCESS_KEY>
-AWS_SECRET_ACCESS_KEY=<SECRET_ACCESS>
-AWS_REGION=us-east-1
-AWS_DOCKER_REGISTRY=<account>.dkr.ecr.us-east-1.amazonaws.com/mlops-blueprint
-SAGEMAKER_ROLE_ARN=<role-arn>
-SAGEMAKER_INSTANCE_TYPE=ml.m5.xlarge
-AWS_DOCKER_PLATFORM=linux/amd64
+DEPLOYMENT_BACKEND=docker_compose
+COMPOSE_DOCKER_PLATFORM=linux/arm64
+COMPOSE_MODEL_PORT=8000
+COMPOSE_ENABLE_PROMETHEUS=false
+COMPOSE_ENABLE_GRAFANA=false
 ```
 
-Set `AWS_DOCKER_PLATFORM` to the architecture required by the SageMaker instance. This is important when deploying from an ARM64 host.
+Monitoring services are opt-in:
 
-### Deploy
+```text
+Prometheus=false, Grafana=false -> model service only
+Prometheus=true,  Grafana=false -> model service + bundled Prometheus
+Prometheus=true,  Grafana=true  -> model service + bundled Prometheus + Grafana
+Prometheus=false, Grafana=true  -> bundled Grafana using COMPOSE_EXTERNAL_PROMETHEUS_URL
+```
+
+If a monitoring port is already occupied, either free that host port or select another value such as `COMPOSE_GRAFANA_PORT=3001`.
+
+---
+
+## 6. Validate the Configuration Before Deployment
+
+Run a dry run first:
+
+```bash
+python model_deployment/deploy.py --backend <backend> --dry-run
+```
+
+Examples:
 
 ```bash
 python model_deployment/deploy.py --backend aws_sagemaker --dry-run
-python model_deployment/deploy.py --backend aws_sagemaker
+python model_deployment/deploy.py --backend kubernetes --dry-run
+python model_deployment/deploy.py --backend docker_compose --dry-run
 ```
 
-The workflow builds the image, authenticates to ECR, pushes the image, reconciles the SageMaker endpoint, waits for readiness, and configures the CloudWatch latency alarm.
+Configuration errors are reported before infrastructure changes whenever possible.
 
-### Test
+---
 
-Check the endpoint state:
+## 7. Deploy
+
+Run the same command without `--dry-run`:
+
+```bash
+python model_deployment/deploy.py --backend <backend>
+```
+
+The common workflow resolves the model source, prepares the serving image, applies the selected backend, waits for readiness, and configures the backend-specific monitoring path.
+
+
+---
+
+## 8. Verify the Deployment
+
+### AWS SageMaker
 
 ```bash
 aws sagemaker describe-endpoint \
@@ -268,119 +393,269 @@ aws sagemaker describe-endpoint \
   --query "{Status:EndpointStatus,FailureReason:FailureReason}"
 ```
 
-The expected status is `InService`.
+Expected state: `InService`.
 
-Optional inference smoke test:
-
-```bash
-python model_deployment/test/test_sagemaker.py
-```
+### Kubernetes / KServe
 
 ```bash
-python3 model_deployment/test/mock_request/mock_request.py \
-        --backend sagemaker \
-        --endpoint-name <sagemaker-endpoint-name> \
-        --region eu-central-1 \
-        --requests 120 \
-        --interval 0.5
+kubectl --context <context> -n <namespace> get inferenceservice,podmonitor
 ```
+
+To access the predictor locally:
 
 ```bash
-python3 model_deployment/test/mock_request/benchmark_deployment.py \
-  --backend sagemaker \
-  --endpoint-name <YOUR_SAGEMAKER_ENDPOINT_NAME> \
-  --region <YOUR_AWS_REGION> \
-  --requests 100 \
-  --concurrency 5 \
-  --warmup 5
+kubectl --context <context> -n <namespace> \
+  port-forward svc/<deployment-name>-inference-predictor 18000:80
 ```
 
-## 5. Docker Compose Deployment
-
-### Prerequisites
-
-- Docker is running.
-- Docker Compose v2 is available.
-- The selected host ports are free.
-
-### Configure
-
-Set the Compose section in `model_deployment/.env`, for example:
-
-```env
-DEPLOYMENT_BACKEND=docker_compose
-COMPOSE_MODEL_PORT=8000
-COMPOSE_DOCKER_PLATFORM=<linux/amd64-or-linux/arm64>
-COMPOSE_ENABLE_PROMETHEUS=true
-COMPOSE_PROMETHEUS_PORT=9090
-COMPOSE_ENABLE_GRAFANA=true
-COMPOSE_GRAFANA_PORT=3000
-```
-
-Monitoring choices are independent:
-
-```text
-Prometheus=true,  Grafana=true   -> bundled Prometheus + Grafana
-Prometheus=false, Grafana=false  -> model service only; use existing monitoring
-Prometheus=false, Grafana=true   -> bundled Grafana + external Prometheus
-Prometheus=true,  Grafana=false  -> bundled Prometheus only
-```
-
-For bundled Grafana with external Prometheus, set `COMPOSE_EXTERNAL_PROMETHEUS_URL`.
-
-### Deploy
+Then:
 
 ```bash
-python model_deployment/deploy.py --backend docker_compose --dry-run
-python model_deployment/deploy.py --backend docker_compose
+curl http://127.0.0.1:18000/health
+curl http://127.0.0.1:18000/metrics
 ```
 
-### Test
-
-Check the model service:
+### Docker Compose
 
 ```bash
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/metrics
 ```
 
-Optional smoke test:
+When bundled monitoring is enabled, Prometheus and Grafana are reachable on their configured host ports.
+
+---
+
+## 9. Run the Optional Test and Evaluation Utilities
+
+The scripts under `model_deployment/test/` are **evaluation utilities**. They are not required by the deployment workflow itself. Run them only after the selected backend has been deployed successfully.
+
+Run the commands below from the repository root. The smoke/integration tests load `model_deployment/.env` automatically. The repeated-request and benchmark scripts are CLI-driven and therefore require the target URL or SageMaker endpoint name as command-line arguments.
+
+### 9.1 Common test configuration
+
+The following optional values in `model_deployment/.env` are used only by the test utilities:
+
+| Variable | Purpose |
+| --- | --- |
+| `IMAGE_PATH` | Optional image used by the smoke/integration tests; useful on deployment-only hosts where `model_training/data/...` is not present |
+| `KSERVE_ENDPOINT_URL` | KServe prediction URL; default `http://127.0.0.1:18000/predict` |
+| `KSERVE_BASE_URL` | KServe base URL for health and metrics tests; default `http://127.0.0.1:18000` |
+| `TEST_PROMETHEUS_URL` | Prometheus URL used by the KServe Prometheus test; default `http://127.0.0.1:19090` |
+| `TEST_GRAFANA_URL` | Grafana URL used by the KServe Grafana test; default `http://127.0.0.1:13000` |
+| `TEST_EXTERNAL_PROMETHEUS_URL` | Optional external Prometheus URL used by the Docker Compose test when bundled Prometheus is disabled |
+| `TEST_EXTERNAL_GRAFANA_URL` | Optional external Grafana URL used by the Docker Compose test when bundled Grafana is disabled |
+| `GRAFANA_USER` | Grafana username used by the KServe Grafana test; default `admin` |
+| `GRAFANA_PASSWORD` | Grafana password required by the KServe Grafana test |
+
+If the repository does not contain the example validation image, point the tests to another compatible image:
+
+```env
+IMAGE_PATH=/absolute/path/to/test-image.JPG
+```
+
+For `mock_request.py` and `benchmark_deployment.py`, use the equivalent `--image /absolute/path/to/test-image.JPG` option because those scripts are CLI-driven.
+
+### 9.2 Docker Compose test
+
+The Docker Compose test uses the Compose settings already configured in `model_deployment/.env`, including `COMPOSE_PROJECT_NAME`, `COMPOSE_MODEL_PORT`, `COMPOSE_ENABLE_PROMETHEUS`, and `COMPOSE_ENABLE_GRAFANA`.
+
+Run:
 
 ```bash
 python model_deployment/test/test_docker_compose.py
 ```
 
+The test verifies the model-service health endpoint, metrics endpoint, successful inference, inference-error accounting, resource utilization under generated requests, and the built-in latency/throughput benchmark. If bundled Prometheus or Grafana is enabled, it also verifies those services. When they are disabled, the corresponding monitoring checks are skipped unless `TEST_EXTERNAL_PROMETHEUS_URL` or `TEST_EXTERNAL_GRAFANA_URL` is configured.
+
+### 9.3 Kubernetes / KServe tests
+
+First port-forward the predictor. With `KUBE_DEPLOYMENT_NAME=champion-model`, for example:
+
 ```bash
-python3 model_deployment/test/mock_request/mock_request.py \
-        --backend http \
-        --url http://127.0.0.1:8000/predict \
-        --requests 120 \
-        --interval 0.5
+kubectl --context <context> -n <namespace> \
+  port-forward svc/champion-model-inference-predictor 18000:80
 ```
 
-The example tests default to the thesis validation image under `model_training/data/val/...`. If that dataset is not present on a deployment-only host, set `IMAGE_PATH` in `model_deployment/.env` to any compatible test input.
+Keep that terminal open. Then run the inference and model-metrics tests from another terminal:
 
-## 6. Teardown and Changing Deployment
+```bash
+python model_deployment/test/test_kserve.py
+python model_deployment/test/test_kserve_monitoring.py
+```
 
-Teardown is a dry-run by default:
+To verify Prometheus, first identify and port-forward the Prometheus service. For a common `kube-prometheus-stack` installation:
+
+```bash
+kubectl -n monitoring get svc
+kubectl -n monitoring \
+  port-forward svc/prometheus-kube-prometheus-prometheus 19090:9090
+```
+
+Then run:
+
+```bash
+python model_deployment/test/test_kserve_prometheus.py
+```
+
+If your Prometheus service or local port differs, set `TEST_PROMETHEUS_URL` accordingly.
+
+To verify Grafana, port-forward Grafana, for example:
+
+```bash
+kubectl -n monitoring \
+  port-forward svc/prometheus-grafana 13000:80
+```
+
+Provide the Grafana credentials either in `model_deployment/.env` or as exported environment variables. Explicit host environment variables take precedence over `.env` values. For example:
+
+```bash
+export GRAFANA_USER=admin
+export GRAFANA_PASSWORD='<grafana-admin-password>'
+python model_deployment/test/test_kserve_grafana.py
+```
+
+If the Grafana URL or Prometheus service differs, adjust `TEST_GRAFANA_URL` and the related test override variables in `model_deployment/.env`.
+
+### 9.4 AWS SageMaker test
+
+The SageMaker smoke test uses the AWS credentials and `AWS_REGION` configured for the deployment. By default it derives the endpoint name from the configured model identity.
+
+Run:
+
+```bash
+python model_deployment/test/test_sagemaker.py
+```
+
+If necessary, set `IMAGE_PATH` to a test image before running the script.
+
+### 9.5 Generate repeated mock requests
+
+`mock_request.py` repeatedly invokes the deployed model. It is useful for creating visible request-rate, latency, and error-series activity in Prometheus/Grafana/CloudWatch. It does not deploy anything.
+
+Docker Compose:
+
+```bash
+python model_deployment/test/mock_request/mock_request.py \
+  --backend http \
+  --url http://127.0.0.1:8000/predict \
+  --requests 120 \
+  --interval 0.5
+```
+
+Kubernetes/KServe, while the predictor is port-forwarded to `18000`:
+
+```bash
+python model_deployment/test/mock_request/mock_request.py \
+  --backend http \
+  --url http://127.0.0.1:18000/predict \
+  --requests 120 \
+  --interval 0.5
+```
+
+AWS SageMaker:
+
+```bash
+python model_deployment/test/mock_request/mock_request.py \
+  --backend sagemaker \
+  --endpoint-name <sagemaker-endpoint-name> \
+  --region <aws-region> \
+  --requests 120 \
+  --interval 0.5
+```
+
+Use `--image /absolute/path/to/test-image.JPG` when the default validation image is not available.
+
+### 9.6 Run the latency and throughput benchmark
+
+`benchmark_deployment.py` measures successful/failed requests, total duration, throughput, mean latency, median latency, P95 latency, minimum latency, and maximum latency. The thesis evaluation protocol uses **5 warm-up requests, 100 measured requests, and concurrency 5**.
+
+Docker Compose:
+
+```bash
+python model_deployment/test/mock_request/benchmark_deployment.py \
+  --backend http \
+  --url http://127.0.0.1:8000/predict \
+  --requests 100 \
+  --concurrency 5 \
+  --warmup 5
+```
+
+Kubernetes/KServe, while the predictor is port-forwarded to `18000`:
+
+```bash
+python model_deployment/test/mock_request/benchmark_deployment.py \
+  --backend http \
+  --url http://127.0.0.1:18000/predict \
+  --requests 100 \
+  --concurrency 5 \
+  --warmup 5
+```
+
+AWS SageMaker:
+
+```bash
+python model_deployment/test/mock_request/benchmark_deployment.py \
+  --backend sagemaker \
+  --endpoint-name <sagemaker-endpoint-name> \
+  --region <aws-region> \
+  --requests 100 \
+  --concurrency 5 \
+  --warmup 5
+```
+
+Use `--image /absolute/path/to/test-image.JPG` when the default image is not available.
+
+---
+
+## 10. Teardown
+
+Teardown is a dry run by default:
 
 ```bash
 python -m model_deployment.teardown --backend <backend>
 ```
 
-To actually remove the selected deployment:
+Execute removal explicitly:
 
 ```bash
 python -m model_deployment.teardown --backend <backend> --execute
 ```
 
-In standalone local-model mode, teardown uses `LOCAL_MODEL_NAME` when configured or otherwise the local model filename stem, matching deployment identity. Kubernetes teardown continues to use `KUBE_DEPLOYMENT_NAME`.
+The teardown implementation targets only the selected deployment identity and does not intentionally remove unrelated infrastructure.
 
-To change backend, model version, ports, resources, or monitoring settings:
+---
 
-1. Update `model_deployment/.env`.
-2. Run `python model_deployment/deploy.py --backend <backend> --dry-run`.
-3. Run `python model_deployment/deploy.py --backend <backend>`.
-4. Teardown the previous deployment only when it is no longer required.
+## 11. Troubleshooting
 
-The teardown code is scoped to the selected deployment and does not intentionally remove unrelated infrastructure.
+### Check Docker architecture
+
+```bash
+uname -m
+docker info --format '{{.Architecture}}'
+```
+
+Ensure the selected backend's required `*_DOCKER_PLATFORM` matches the target architecture.
+
+### Check port usage
+
+Linux:
+
+```bash
+sudo ss -ltnp
+```
+
+Docker-published ports:
+
+```bash
+docker ps --format "table {{.Names}}\t{{.Ports}}"
+```
+
+### Check Docker Compose state and logs
+
+```bash
+docker compose ps -a
+docker compose logs --tail 100
+```
+
+These commands are useful for deeper investigation after the blueprint has already reported the concrete failure cause.

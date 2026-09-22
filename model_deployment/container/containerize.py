@@ -8,7 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from model_deployment import DeploymentError, safe_resource_name
+from model_deployment import DeploymentError, exception_message, safe_resource_name
 
 logger = logging.getLogger(__name__)
 CONTAINER_DIR = Path(__file__).resolve().parent
@@ -29,7 +29,10 @@ def prepare_ecr(tag: str, docker_registry: str, build_env: dict) -> None:
     try:
         import boto3
     except ImportError as exc:
-        raise DeploymentError("IMAGE_PUSH_FAILED", "boto3 is required for ECR") from exc
+        raise DeploymentError(
+            "IMAGE_PUSH_FAILED",
+            f"boto3 is required for ECR: {exception_message(exc)}",
+        ) from exc
 
     registry_host = docker_registry.split("/", 1)[0]
     host_parts = registry_host.split(".")
@@ -49,14 +52,14 @@ def prepare_ecr(tag: str, docker_registry: str, build_env: dict) -> None:
         if code not in {"RepositoryNotFoundException", "ResourceNotFoundException"}:
             raise DeploymentError(
                 "IMAGE_PUSH_FAILED",
-                f"Could not inspect ECR repository '{repository_name}': {exc}",
+                f"Could not inspect ECR repository '{repository_name}': {exception_message(exc)}",
             ) from exc
         try:
             ecr.create_repository(repositoryName=repository_name)
         except Exception as create_exc:
             raise DeploymentError(
                 "IMAGE_PUSH_FAILED",
-                f"Could not create ECR repository '{repository_name}': {create_exc}",
+                f"Could not create ECR repository '{repository_name}': {exception_message(create_exc)}",
             ) from create_exc
 
     try:
@@ -69,13 +72,14 @@ def prepare_ecr(tag: str, docker_registry: str, build_env: dict) -> None:
             check=True,
             text=True,
             env=build_env,
+            capture_output=True,
         )
     except DeploymentError:
         raise
     except Exception as exc:
         raise DeploymentError(
             "IMAGE_PUSH_FAILED",
-            f"Could not authenticate Docker to ECR host '{registry_host}': {exc}",
+            f"Could not authenticate Docker to ECR host '{registry_host}': {exception_message(exc)}",
         ) from exc
 
 
@@ -138,7 +142,10 @@ def _stage_mlflow_artifact(model_uri: str, artifact_dir: Path, download_dir: Pat
     try:
         import mlflow
     except ImportError as exc:
-        raise DeploymentError("IMAGE_BUILD_FAILED", "MLflow is not installed") from exc
+        raise DeploymentError(
+            "IMAGE_BUILD_FAILED",
+            f"MLflow is not installed: {exception_message(exc)}",
+        ) from exc
 
     logger.info("Downloading resolved MLflow artifact '%s'", model_uri)
     downloaded = mlflow.artifacts.download_artifacts(
@@ -240,28 +247,42 @@ def build_image(
             model_format,
             "enabled" if enable_prometheus_metrics else "disabled",
         )
-        subprocess.run(command, check=True, env=build_env)
+        subprocess.run(
+            command,
+            check=True,
+            env=build_env,
+            capture_output=True,
+            text=True,
+        )
 
         if push and docker_registry:
             stage = "IMAGE_PUSH_FAILED"
             if ".dkr.ecr." in docker_registry:
                 prepare_ecr(tag, docker_registry, build_env)
             logger.info("Pushing Docker image '%s'", tag)
-            subprocess.run(["docker", "push", tag], check=True, env=build_env)
+            subprocess.run(
+                ["docker", "push", tag],
+                check=True,
+                env=build_env,
+                capture_output=True,
+                text=True,
+            )
     except DeploymentError:
         raise
     except subprocess.CalledProcessError as exc:
+        detail = exception_message(exc)
         if stage == "IMAGE_BUILD_FAILED" and platform:
             message = (
-                f"Docker build failed with exit code {exc.returncode} for requested platform "
-                f"'{platform}'. Ensure Docker/BuildKit supports that platform (and emulation, "
-                "when cross-building)."
+                f"Docker build failed for requested platform '{platform}': {detail}"
             )
         else:
-            message = f"Docker/registry command failed with exit code {exc.returncode}"
+            message = f"Docker/registry command failed: {detail}"
         raise DeploymentError(stage, message) from exc
     except Exception as exc:
-        raise DeploymentError(stage, f"Could not prepare image '{tag}': {exc}") from exc
+        raise DeploymentError(
+            stage,
+            f"Could not prepare image '{tag}': {exception_message(exc)}",
+        ) from exc
     finally:
         shutil.rmtree(artifact_dir, ignore_errors=True)
         shutil.rmtree(download_dir, ignore_errors=True)

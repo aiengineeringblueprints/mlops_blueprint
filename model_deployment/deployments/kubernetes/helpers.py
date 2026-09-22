@@ -8,7 +8,13 @@ import time
 import yaml
 from jinja2 import Template
 
-from model_deployment import DeploymentError, ResolvedModel, safe_resource_name, stable_deployment_name
+from model_deployment import (
+    DeploymentError,
+    ResolvedModel,
+    exception_message,
+    safe_resource_name,
+    stable_deployment_name,
+)
 from model_deployment.config import DeploymentSettings
 from model_deployment.monitoring import wait_prometheus_target
 
@@ -49,7 +55,7 @@ def wait_kserve_ready(
         except Exception as exc:
             raise DeploymentError(
                 "DEPLOYMENT_FAILED",
-                f"Could not inspect KServe InferenceService '{namespace}/{name}': {exc}",
+                f"Could not inspect KServe InferenceService '{namespace}/{name}': {exception_message(exc)}",
             ) from exc
         condition = get_kserve_ready_condition(resource)
         if condition:
@@ -126,11 +132,11 @@ def require_crd(api_extensions, name: str, description: str) -> None:
         if status == 404:
             raise DeploymentError(
                 "PREREQUISITE_MISSING",
-                f"{description} CRD '{name}' is not installed.",
+                f"{description} CRD '{name}' is not installed: {exception_message(exc)}",
             ) from exc
         raise DeploymentError(
             "PREREQUISITE_UNREACHABLE",
-            f"Could not inspect required CRD '{name}': {exc}",
+            f"Could not inspect required CRD '{name}': {exception_message(exc)}",
         ) from exc
 
 
@@ -159,7 +165,7 @@ def preflight_kserve(
         except Exception as exc:
             raise DeploymentError(
                 "PREREQUISITE_UNREACHABLE",
-                f"Unable to load/connect to Kubernetes context '{settings.kube_context}': {exc}",
+                f"Unable to load/connect to Kubernetes context '{settings.kube_context}': {exception_message(exc)}",
             ) from exc
 
     try:
@@ -167,7 +173,7 @@ def preflight_kserve(
     except Exception as exc:
         raise DeploymentError(
             "PREREQUISITE_UNREACHABLE",
-            f"Unable to connect to Kubernetes cluster for context '{settings.kube_context}': {exc}",
+            f"Unable to connect to Kubernetes cluster for context '{settings.kube_context}': {exception_message(exc)}",
         ) from exc
 
     require_crd(api_extensions, "inferenceservices.serving.kserve.io", "KServe InferenceService")
@@ -183,7 +189,8 @@ def preflight_kserve(
                 raise DeploymentError(
                     "PREREQUISITE_MISSING",
                     "PodMonitor CRD is unavailable. Install/configure Prometheus Operator "
-                    "before using the blueprint's Prometheus monitoring integration.",
+                    "before using the blueprint's Prometheus monitoring integration. "
+                    f"Underlying error: {exception_message(exc)}",
                 ) from exc
             raise
 
@@ -193,11 +200,12 @@ def preflight_kserve(
         if getattr(exc, "status", None) == 404:
             raise DeploymentError(
                 "PREREQUISITE_MISSING",
-                f"Target namespace '{settings.namespace}' does not exist. Create it before deployment.",
+                f"Target namespace '{settings.namespace}' does not exist. Create it before deployment: "
+                    f"{exception_message(exc)}",
             ) from exc
         raise DeploymentError(
             "PREREQUISITE_UNREACHABLE",
-            f"Could not inspect target namespace '{settings.namespace}': {exc}",
+            f"Could not inspect target namespace '{settings.namespace}': {exception_message(exc)}",
         ) from exc
 
     if settings.image_pull_secret:
@@ -208,12 +216,12 @@ def preflight_kserve(
                 raise DeploymentError(
                     "PREREQUISITE_MISSING",
                     f"Configured imagePullSecret '{settings.image_pull_secret}' does not exist "
-                    f"in namespace '{settings.namespace}'.",
+                    f"in namespace '{settings.namespace}': {exception_message(exc)}",
                 ) from exc
             raise DeploymentError(
                 "PREREQUISITE_UNREACHABLE",
                 f"Could not inspect imagePullSecret '{settings.image_pull_secret}' in "
-                f"namespace '{settings.namespace}': {exc}",
+                f"namespace '{settings.namespace}': {exception_message(exc)}",
             ) from exc
 
 
@@ -248,7 +256,7 @@ def deploy_kserve(
         if status != 409:
             raise DeploymentError(
                 "DEPLOYMENT_SUBMISSION_FAILED",
-                f"Could not create KServe InferenceService '{settings.namespace}/{name}': {exc}",
+                f"Could not create KServe InferenceService '{settings.namespace}/{name}': {exception_message(exc)}",
             ) from exc
         try:
             custom_api.patch_namespaced_custom_object(
@@ -263,7 +271,7 @@ def deploy_kserve(
         except Exception as patch_exc:
             raise DeploymentError(
                 "DEPLOYMENT_SUBMISSION_FAILED",
-                f"Could not update KServe InferenceService '{settings.namespace}/{name}': {patch_exc}",
+                f"Could not update KServe InferenceService '{settings.namespace}/{name}': {exception_message(patch_exc)}",
             ) from patch_exc
 
     wait_kserve_ready(
@@ -321,7 +329,7 @@ def configure_kserve_monitoring(
         if getattr(exc, "status", None) != 409:
             raise DeploymentError(
                 "MONITORING_CONFIGURATION_FAILED",
-                f"Could not create PodMonitor '{settings.namespace}/{name}': {exc}",
+                f"Could not create PodMonitor '{settings.namespace}/{name}': {exception_message(exc)}",
             ) from exc
         try:
             custom_api.patch_namespaced_custom_object(
@@ -336,7 +344,7 @@ def configure_kserve_monitoring(
         except Exception as patch_exc:
             raise DeploymentError(
                 "MONITORING_CONFIGURATION_FAILED",
-                f"Could not update PodMonitor '{settings.namespace}/{name}': {patch_exc}",
+                f"Could not update PodMonitor '{settings.namespace}/{name}': {exception_message(patch_exc)}",
             ) from patch_exc
 
     if settings.prometheus_url:
@@ -387,6 +395,6 @@ def teardown_kserve(
             if getattr(exc, "status", None) != 404:
                 raise DeploymentError(
                     "TEARDOWN_FAILED",
-                    f"Could not delete exact resource '{namespace}/{resource_name}': {exc}",
+                    f"Could not delete exact resource '{namespace}/{resource_name}': {exception_message(exc)}",
                 ) from exc
     return f"Deleted exact KServe deployment resources for {namespace}/{name}."

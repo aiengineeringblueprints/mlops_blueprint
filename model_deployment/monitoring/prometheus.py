@@ -6,7 +6,7 @@ import time
 from typing import Callable, Iterable, Optional
 from urllib.request import urlopen
 
-from model_deployment import DeploymentError
+from model_deployment import DeploymentError, exception_message
 from model_deployment.config import DeploymentSettings
 
 
@@ -74,7 +74,7 @@ def wait_prometheus_target(
                 return
             last_detail = f"{len(targets)} active target(s) checked; matching workload not ready"
         except Exception as exc:
-            last_detail = f"Prometheus query failed: {exc}"
+            last_detail = f"Prometheus query failed: {exception_message(exc)}"
         sleep_fn(settings.prometheus_discovery_poll_interval_seconds)
 
     raise DeploymentError(
@@ -122,7 +122,7 @@ def wait_compose_prometheus_target(
                 return
             last_detail = f"{len(targets)} Prometheus target(s) checked; model-service not up"
         except Exception as exc:
-            last_detail = f"Prometheus query failed: {exc}"
+            last_detail = f"Prometheus query failed: {exception_message(exc)}"
         sleep_fn(settings.prometheus_discovery_poll_interval_seconds)
 
     raise DeploymentError(

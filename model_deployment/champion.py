@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from model_deployment import DeploymentError, ResolvedModel
+from model_deployment import DeploymentError, ResolvedModel, exception_message
 
 
 class ChampionProvenanceError(RuntimeError):
@@ -62,7 +62,10 @@ def resolve_model_version(
         try:
             import mlflow
         except ImportError as exc:
-            raise DeploymentError("MODEL_RESOLUTION_FAILED", "MLflow is not installed") from exc
+            raise DeploymentError(
+                "MODEL_RESOLUTION_FAILED",
+                f"MLflow is not installed: {exception_message(exc)}",
+            ) from exc
         mlflow.set_tracking_uri(tracking_uri)
         client = mlflow.MlflowClient()
 
@@ -77,7 +80,8 @@ def resolve_model_version(
                 raise DeploymentError(
                     "MODEL_RESOLUTION_FAILED",
                     f"Registered model '{model_name}' has no usable alias '{alias}'. "
-                    "Register/assign a champion first, or pass --model-version explicitly.",
+                    "Register/assign a champion first, or pass --model-version explicitly. "
+                    f"Underlying error: {exception_message(exc)}",
                 ) from exc
             alias_used = alias
             run_id = getattr(model_version, "run_id", None)
@@ -95,7 +99,7 @@ def resolve_model_version(
                 raise DeploymentError(
                     "INVALID_CHAMPION_PROVENANCE",
                     f"Alias '{alias}' points to version {model_version.version}, but its champion provenance "
-                    f"is invalid: {exc} Pass an explicit --model-version only when intentionally "
+                    f"is invalid: {exception_message(exc)} Pass an explicit --model-version only when intentionally "
                     "deploying that exact historical version.",
                 ) from exc
     except DeploymentError:
@@ -104,7 +108,7 @@ def resolve_model_version(
         requested = f"version {version}" if version else f"alias '{alias}'"
         raise DeploymentError(
             "MODEL_RESOLUTION_FAILED",
-            f"Could not resolve {requested} for registered model '{model_name}': {exc}",
+            f"Could not resolve {requested} for registered model '{model_name}': {exception_message(exc)}",
         ) from exc
 
     return ResolvedModel(
