@@ -67,8 +67,8 @@ async def handle_prediction_request(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Invalid JSON payload. "
-                    "Send a valid JSON request containing model input."
+                    "Invalid JSON payload: "
+                    f"{str(exc).strip() or exc.__class__.__name__}"
                 ),
             ) from exc
         try:
@@ -82,7 +82,10 @@ async def handle_prediction_request(
             logger.exception(
                 "Inference failed for model=%s version=%s", MODEL_NAME, MODEL_VERSION
             )
-            raise HTTPException(status_code=500, detail="Inference failed.") from exc
+            raise HTTPException(
+                status_code=500,
+                detail=f"Inference failed: {str(exc).strip() or exc.__class__.__name__}",
+            ) from exc
     except HTTPException:
         METRICS.errors.labels(**LABELS).inc()
         raise

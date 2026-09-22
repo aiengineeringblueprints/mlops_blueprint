@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from model_deployment import (
     DeploymentError,
     DeploymentRequest,
+    exception_message,
     validate_kubernetes_deployment_name,
 )
 
@@ -69,8 +70,8 @@ class DeploymentSettings:
     compose_model_port: int = 8000
     compose_prometheus_port: int = 9090
     compose_grafana_port: int = 3000
-    compose_enable_prometheus: bool = True
-    compose_enable_grafana: bool = True
+    compose_enable_prometheus: bool = False
+    compose_enable_grafana: bool = False
     compose_external_prometheus_url: Optional[str] = None
 
 
@@ -94,7 +95,10 @@ def get_int(
     try:
         value = int(raw)
     except ValueError as exc:
-        raise DeploymentError("CONFIGURATION_INVALID", f"{name} must be an integer") from exc
+        raise DeploymentError(
+            "CONFIGURATION_INVALID",
+            f"{name} must be an integer: {exception_message(exc)}",
+        ) from exc
     if value < minimum or (maximum is not None and value > maximum):
         upper = f" and <= {maximum}" if maximum is not None else ""
         raise DeploymentError(
@@ -128,7 +132,8 @@ def get_json_string_map(name: str) -> Dict[str, str]:
         value = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise DeploymentError(
-            "CONFIGURATION_INVALID", f"{name} must be a valid JSON object"
+            "CONFIGURATION_INVALID",
+            f"{name} must be a valid JSON object: {exception_message(exc)}",
         ) from exc
     if not isinstance(value, dict):
         raise DeploymentError("CONFIGURATION_INVALID", f"{name} must be a JSON object")
@@ -309,6 +314,7 @@ def load_settings(target: str) -> DeploymentSettings:
         role = get_value("SAGEMAKER_ROLE_ARN")
         instance_type = get_value("SAGEMAKER_INSTANCE_TYPE")
         registry = get_value("AWS_DOCKER_REGISTRY", "") or ""
+        platform = get_value("AWS_DOCKER_PLATFORM")
         missing = [
             key
             for key, value in (
@@ -316,6 +322,7 @@ def load_settings(target: str) -> DeploymentSettings:
                 ("SAGEMAKER_ROLE_ARN", role),
                 ("SAGEMAKER_INSTANCE_TYPE", instance_type),
                 ("AWS_DOCKER_REGISTRY", registry),
+                ("AWS_DOCKER_PLATFORM", platform),
             )
             if not value
         ]
@@ -330,7 +337,7 @@ def load_settings(target: str) -> DeploymentSettings:
             serving_backend="sagemaker",
             monitoring_backend="cloudwatch",
             registry=registry,
-            platform=get_value("AWS_DOCKER_PLATFORM"),
+            platform=platform,
             aws_region=region,
             sagemaker_role_arn=role,
             sagemaker_instance_type=instance_type,
@@ -350,6 +357,7 @@ def load_settings(target: str) -> DeploymentSettings:
         kube_context = get_value("KUBE_CONTEXT")
         kube_deployment_name = get_value("KUBE_DEPLOYMENT_NAME")
         cpu_request = get_value("KUBE_CPU_REQUEST")
+        platform = get_value("KUBE_DOCKER_PLATFORM")
         mem_request = get_value("KUBE_MEM_REQUEST")
         missing = [
             key
@@ -359,6 +367,7 @@ def load_settings(target: str) -> DeploymentSettings:
                 ("KUBE_DOCKER_REGISTRY", registry),
                 ("KUBE_CPU_REQUEST", cpu_request),
                 ("KUBE_MEM_REQUEST", mem_request),
+                ("KUBE_DOCKER_PLATFORM", platform),
             )
             if not value
         ]
@@ -387,7 +396,7 @@ def load_settings(target: str) -> DeploymentSettings:
             serving_backend="kserve",
             monitoring_backend="prometheus",
             registry=registry,
-            platform=get_value("KUBE_DOCKER_PLATFORM"),
+            platform=platform,
             kube_context=kube_context,
             kube_deployment_name=kube_deployment_name,
             namespace=get_value("KUBE_NAMESPACE", "default") or "default",
@@ -411,9 +420,15 @@ def load_settings(target: str) -> DeploymentSettings:
     model_port = get_int("COMPOSE_MODEL_PORT", 8000, minimum=1, maximum=65535)
     prometheus_port = get_int("COMPOSE_PROMETHEUS_PORT", 9090, minimum=1, maximum=65535)
     grafana_port = get_int("COMPOSE_GRAFANA_PORT", 3000, minimum=1, maximum=65535)
-    enable_prometheus = get_bool("COMPOSE_ENABLE_PROMETHEUS", True)
-    enable_grafana = get_bool("COMPOSE_ENABLE_GRAFANA", True)
+    enable_prometheus = get_bool("COMPOSE_ENABLE_PROMETHEUS", False)
+    enable_grafana = get_bool("COMPOSE_ENABLE_GRAFANA", False)
     external_prometheus_url = get_value("COMPOSE_EXTERNAL_PROMETHEUS_URL")
+    platform = get_value("COMPOSE_DOCKER_PLATFORM")
+    if not platform:
+        raise DeploymentError(
+            "CONFIGURATION_MISSING",
+            "Docker Compose deployment requires: COMPOSE_DOCKER_PLATFORM",
+        )
 
     validate_compose_ports(
         model_port,
@@ -434,7 +449,7 @@ def load_settings(target: str) -> DeploymentSettings:
         serving_backend="docker_compose",
         monitoring_backend="prometheus_grafana",
         registry="",
-        platform=get_value("COMPOSE_DOCKER_PLATFORM"),
+        platform=platform,
         compose_project_name=get_value("COMPOSE_PROJECT_NAME"),
         compose_model_port=model_port,
         compose_prometheus_port=prometheus_port,
