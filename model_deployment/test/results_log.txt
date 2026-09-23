@@ -1,0 +1,230 @@
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint $ python model_deployment/deploy.py --backend docker_compose --dry-run
+2026-09-23 20:14:06,535 [INFO] model_deployment.main: stage=model_resolution source=local model=model target=docker_compose path=/home/nico/Downloads/model.keras format=auto
+2026-09-23 20:14:10,001 [INFO] model_deployment.main: Deployment plan:
+{
+  "alias": null,
+  "deployment_name": "mlops-model",
+  "deployment_target": "docker_compose",
+  "docker_platform": "linux/arm64",
+  "external_prometheus_url": null,
+  "grafana_endpoint": null,
+  "image": "model:4083961b9d4a",
+  "metrics_endpoint": "http://localhost:8000/metrics",
+  "model_endpoint": "http://localhost:8000",
+  "model_name": "model",
+  "model_uri": "/home/nico/Downloads/model.keras",
+  "monitoring_backend": "prometheus_grafana",
+  "monitoring_configuration": "external/no bundled Prometheus + external/no bundled Grafana",
+  "prometheus_endpoint": null,
+  "registered_version": "4083961b9d4a",
+  "service_name": "model-service",
+  "serving_backend": "docker_compose"
+}
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint $ python model_deployment/deploy.py --backend docker_compose
+^[[3~2026-09-23 20:14:31,493 [INFO] model_deployment.main: stage=preflight target=docker_compose backend=docker_compose
+2026-09-23 20:14:35,663 [INFO] model_deployment.main: stage=model_resolution source=local model=model target=docker_compose path=/home/nico/Downloads/model.keras format=auto
+2026-09-23 20:14:39,177 [INFO] model_deployment.main: stage=image_prepare model=model version=4083961b9d4a target=docker_compose image=model:4083961b9d4a
+2026-09-23 20:14:41,220 [INFO] model_deployment.container.containerize: Staged standalone local model '/home/nico/Downloads/model.keras'
+2026-09-23 20:14:41,226 [INFO] model_deployment.container.containerize: Building Docker image 'model:4083961b9d4a' for platform linux/arm64 (model_source=local model_format=keras prometheus_metrics=enabled)
+2026-09-23 20:23:30,000 [INFO] model_deployment.main: stage=deployment target=docker_compose backend=docker_compose model=model version=4083961b9d4a deployment=mlops-model
+2026-09-23 20:24:08,158 [INFO] model_deployment.main: stage=monitoring target=docker_compose backend=prometheus_grafana deployment=mlops-model
+2026-09-23 20:24:08,164 [INFO] model_deployment.main: Deployment result:
+{
+  "alias": null,
+  "deployment_name": "mlops-model",
+  "deployment_target": "docker_compose",
+  "docker_platform": "linux/arm64",
+  "external_prometheus_url": null,
+  "grafana_endpoint": null,
+  "image": "model:4083961b9d4a",
+  "metrics_endpoint": "http://localhost:8000/metrics",
+  "model_endpoint": "http://localhost:8000",
+  "model_name": "model",
+  "monitoring": "external/no bundled Prometheus + external/no bundled Grafana; model /metrics remains exposed for organization-managed monitoring",
+  "monitoring_configuration": "external/no bundled Prometheus + external/no bundled Grafana",
+  "prometheus_endpoint": null,
+  "registered_version": "4083961b9d4a",
+  "service_name": "model-service",
+  "status": "Ready"
+}
+2026-09-23 20:24:08,166 [INFO] model_deployment.main: Deployment successful: model=model version=4083961b9d4a target=docker_compose deployment=mlops-model
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint $ curl http://127.0.0.1:8000/health
+{"status":"ok","model":"model","version":"4083961b9d4a","source":"local","format":"keras"}(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint $ curl http://127.0.0.1:8000/metrics
+# HELP inference_requests_total Inference requests
+# TYPE inference_requests_total counter
+# HELP inference_errors_total Inference errors
+# TYPE inference_errors_total counter
+# HELP inference_duration_seconds Inference request duration
+# TYPE inference_duration_seconds histogram
+# HELP model_up Whether the model loaded successfully
+# TYPE model_up gauge
+model_up{model="model",version="4083961b9d4a"} 1.0
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint $ python model_deployment/test/test_docker_compose.py
+2026-09-23 23:45:23,177 [ERROR] Image not found: .
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint $ lds
+bash: lds: command not found
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint $ ls
+LICENSE  model_deployment  model_training
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint $ cd model_deployment/
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint/model_deployment $ ls
+champion.py  container  deployments  __init__.py     main.py     __pycache__  requirements.txt  teardown.py
+config.py    core.py    deploy.py    local_model.py  monitoring  README.md    serving           test
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint/model_deployment $ cd tes
+bash: cd: tes: No such file or directory
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint/model_deployment $ cd test/
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint/model_deployment/test $ ls
+__init__.py   __pycache__             test_kserve_grafana.py     test_kserve_prometheus.py  test_sagemaker.py
+mock_request  test_docker_compose.py  test_kserve_monitoring.py  test_kserve.py
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint/model_deployment/test $ cd mock_request/
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint/model_deployment/test/mock_request $ ls
+benchmark_deployment.py  __init__.py  mock_request.py  __pycache__
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint/model_deployment/test/mock_request $ python model_deployment/test/mock_request/mock_request.py \
+  --backend http \
+  --url http://127.0.0.1:8000/predict \
+  --requests 120 \
+  --interval 0.5
+python: can't open file '/home/nico/Documents/Source/mlops_blueprint/model_deployment/test/mock_request/model_deployment/test/mock_request/mock_request.py': [Errno 2] No such file or directory
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint/model_deployment/test/mock_request $ python mock_request.py   --backend http   --url http://127.0.0.1:8000/predict   --requests 120   --interval 0.5
+2026-09-23 23:47:24,658 [INFO] Traffic target: http://127.0.0.1:8000/predict
+2026-09-23 23:47:24,658 [INFO] Image: /home/nico/Documents/Source/mlops_blueprint/model_training/data/val/Standard-Schraube/IMG_8059.JPG
+2026-09-23 23:47:24,659 [INFO] Sending 120 requests with 0.500s interval
+2026-09-23 23:47:27,206 [INFO] Progress 1/120: successes=1 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:47:37,019 [INFO] Progress 10/120: successes=10 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:47:47,943 [INFO] Progress 20/120: successes=20 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:47:58,754 [INFO] Progress 30/120: successes=30 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:48:10,183 [INFO] Progress 40/120: successes=40 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:48:22,900 [INFO] Progress 50/120: successes=50 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:48:33,785 [INFO] Progress 60/120: successes=60 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:48:44,984 [INFO] Progress 70/120: successes=70 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:48:56,141 [INFO] Progress 80/120: successes=80 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:49:07,368 [INFO] Progress 90/120: successes=90 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:49:18,286 [INFO] Progress 100/120: successes=100 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:49:29,430 [INFO] Progress 110/120: successes=110 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:49:40,724 [INFO] Progress 120/120: successes=120 failures=0 latest=Standard-Schraube (22.7%)
+2026-09-23 23:49:40,748 [INFO] Traffic generation completed: requests=120 successes=120 failures=0 elapsed=136.1s avg_client_latency=637.9ms p95_client_latency=757.3ms
+(.venv) nico@AnKIt-PI:~/Documents/Source/mlops_blueprint/model_deployment/test/mock_request $ python benchmark_deployment.py \
+  --backend http \
+  --url http://127.0.0.1:8000/predict \
+  --requests 100 \
+  --concurrency 5 \
+  --warmup 5
+2026-09-23 23:49:55,970 [INFO] Benchmarking HTTP endpoint: http://127.0.0.1:8000/predict
+2026-09-23 23:49:56,194 [INFO] Running 5 warm-up requests
+2026-09-23 23:49:57,660 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:49:58,524 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:49:59,416 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:00,370 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:01,193 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:01,194 [INFO] Starting HTTP benchmark: requests=100 concurrency=5
+2026-09-23 23:50:03,115 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:03,745 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:04,320 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:04,903 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:05,487 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:06,111 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:06,684 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:07,385 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:07,957 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:08,545 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:09,111 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:09,694 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:10,265 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:10,919 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:11,484 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:12,057 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:12,642 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:13,267 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:13,835 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:14,448 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:15,044 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:15,669 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:16,240 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:16,941 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:17,727 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:18,540 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:19,113 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:19,700 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:20,300 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:20,937 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:21,514 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:22,172 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:22,740 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:23,350 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:23,935 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:24,971 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:25,989 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:26,769 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:27,341 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:27,924 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:28,531 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:29,325 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:29,931 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:30,504 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:31,074 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:31,852 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:32,450 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:33,233 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:33,868 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:34,479 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:35,054 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:35,626 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:36,328 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:38,344 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:39,180 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:39,959 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:40,557 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:41,184 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:41,817 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:42,609 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:43,178 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:44,000 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:44,582 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:45,152 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:45,728 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:46,367 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:47,236 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:47,984 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:49,135 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:50,227 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:51,181 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:52,229 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:52,829 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:53,425 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:53,995 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:54,574 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:55,258 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:56,139 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:56,906 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:57,632 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:58,239 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:58,862 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:50:59,459 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:00,130 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:00,972 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:01,919 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:02,635 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:03,680 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:04,625 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:05,578 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:06,232 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:06,909 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:07,582 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:08,327 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:08,913 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:09,644 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:10,216 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:10,826 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:11,390 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:11,948 [INFO] HTTP Request: POST http://127.0.0.1:8000/predict "HTTP/1.1 200 OK"
+2026-09-23 23:51:11,984 [INFO] Benchmark completed
+2026-09-23 23:51:11,986 [INFO] Total requests: 100
+2026-09-23 23:51:11,987 [INFO] Successful requests: 100
+2026-09-23 23:51:11,988 [INFO] Failed requests: 0
+2026-09-23 23:51:11,988 [INFO] Success rate: 100.00%
+2026-09-23 23:51:11,993 [INFO] Total duration: 70.760 s
+2026-09-23 23:51:11,994 [INFO] Throughput: 1.413 requests/s
+2026-09-23 23:51:11,994 [INFO] Mean latency: 3456.921 ms
+2026-09-23 23:51:11,995 [INFO] Median latency: 3314.784 ms
+2026-09-23 23:51:11,996 [INFO] P95 latency: 4815.810 ms
+2026-09-23 23:51:11,996 [INFO] Minimum latency: 1864.119 ms
+2026-09-23 23:51:11,997 [INFO] Maximum latency: 4992.194 ms
