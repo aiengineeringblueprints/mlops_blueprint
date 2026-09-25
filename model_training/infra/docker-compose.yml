@@ -1,0 +1,82 @@
+# model_training/infra/docker-compose.yml
+# Local infrastructure for the training workflow: object storage (MinIO), data versioning
+# (LakeFS on top of MinIO) and experiment tracking / model registry (MLflow server).
+# Ports and credentials come from infra/.env (see infra/.env.example).
+services:
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  lakefs:
+    image: treeverse/lakefs:1
+    # Run as root: the named volume mount point at /home/lakefs/lakefs/metadata is created
+    # root-owned (0:0, 0755) by the Docker engine on this host, since that path does not
+    # pre-exist in the image; the image's default lakefs user (uid 100) cannot write to it
+    # otherwise, causing "Cannot write pid file ... permission denied" on startup.
+    user: "0:0"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      LAKEFS_DATABASE_TYPE: local
+      LAKEFS_BLOCKSTORE_TYPE: s3
+      LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE: "true"
+      LAKEFS_BLOCKSTORE_S3_ENDPOINT: http://minio:9000
+      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LAKEFS_AUTH_ENCRYPT_SECRET_KEY: local-development-only
+      LAKEFS_STATS_ENABLED: "false"
+      LAKEFS_INSTALLATION_USER_NAME: admin
+      LAKEFS_INSTALLATION_ACCESS_KEY_ID: ${LAKEFS_ACCESS_KEY_ID:-AKIAIOSFOLKFSSAMPLES}
+      LAKEFS_INSTALLATION_SECRET_ACCESS_KEY: ${LAKEFS_SECRET_ACCESS_KEY:-wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY}
+    ports:
+      - "${LAKEFS_PORT:-8000}:8000"
+    volumes:
+      - lakefs-data:/home/lakefs/lakefs/metadata
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/_health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.4.0
+    command:
+      - mlflow
+      - server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --backend-store-uri
+      - sqlite:////mlflow/mlflow.db
+      - --artifacts-destination
+      - /mlflow/artifacts
+      - --serve-artifacts
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    volumes:
+      - mlflow-data:/mlflow
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  minio-data:
+  lakefs-data:
+  mlflow-data:
