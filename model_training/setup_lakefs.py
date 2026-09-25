@@ -3,9 +3,12 @@ import sys
 import logging
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 MODEL_TRAINING_ROOT = Path(__file__).resolve().parent
+load_dotenv(MODEL_TRAINING_ROOT / ".env", override=False)
 
 
 def run_command(command, shell=False):
