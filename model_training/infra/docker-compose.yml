@@ -35,6 +35,10 @@ services:
       LAKEFS_BLOCKSTORE_TYPE: s3
       LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE: "true"
       LAKEFS_BLOCKSTORE_S3_ENDPOINT: http://minio:9000
+      # lakectl/mc run on the host, not on this Compose network, so object downloads via
+      # presigned URLs (e.g. "lakectl local checkout") must resolve against the host-mapped
+      # MinIO port, not the internal "minio" hostname used for server-to-server calls above.
+      LAKEFS_BLOCKSTORE_S3_PRE_SIGNED_ENDPOINT: http://127.0.0.1:${MINIO_PORT:-9000}
       LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       LAKEFS_AUTH_ENCRYPT_SECRET_KEY: local-development-only
