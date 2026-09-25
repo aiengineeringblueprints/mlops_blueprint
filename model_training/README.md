@@ -27,6 +27,27 @@ python model_training/mlflow_registry.py
 
 The manual LakeFS shell commands in the sections below assume `cd model_training` first, because they use the relative `data/` path.
 
+## Run the whole workflow locally
+
+The infrastructure (MinIO, LakeFS, MLflow server) is one Compose stack:
+
+    cd model_training/infra && docker compose up -d --wait
+
+`lakectl` and `mc` read their endpoints and credentials from `model_training/.env`
+(`LAKECTL_*`, `MC_HOST_*`), so no `lakectl config` or `mc alias set` is needed.
+The complete sequence, from raw data to an exported champion model:
+
+    python model_training/setup_lakefs.py            # bucket, repository, initial data commit
+    python model_training/prepare_lakefs_branch.py   # branch "augmented", local checkout
+    python model_training/data_augmentation.py       # 5 augmented images per original
+    python model_training/commit_lakefs.py           # commit the data version (GIT_PUSH=true also pushes)
+    python model_training/train.py                   # MLflow run, champion tag by validation_accuracy
+    python model_training/mlflow_registry.py         # register the champion, alias "champion"
+    python model_training/export_champion.py         # output/model.keras, classes.json, MODEL_CARD.md
+
+`model_training/test/smoke_train.sh` runs exactly this sequence in a temporary copy and
+checks the result through the MLflow REST API.
+
 ## Infrastructure Setup
 
 Follow steps 0 and 1 from https://github.com/aiengineeringblueprints/lakefs_demo to set up LakeFS and MinIO.
