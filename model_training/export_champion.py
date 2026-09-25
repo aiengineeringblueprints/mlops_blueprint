@@ -31,6 +31,28 @@ def class_names(train_dir: Path) -> list[str]:
     return sorted(p.name for p in train_dir.iterdir() if p.is_dir())
 
 
+def dataset_reference(run) -> str:
+    """Extract the dataset reference from the run's dataset inputs.
+
+    MLflow stores the dataset source as a JSON-serialized DatasetSource object.
+    This function extracts the URL (or uri) from that JSON if present,
+    otherwise returns the raw string, or "not recorded" if no dataset inputs exist.
+    """
+    inputs = run.inputs.dataset_inputs if run.inputs else []
+    if not inputs:
+        return "not recorded"
+
+    source = inputs[0].dataset.source
+    if isinstance(source, str):
+        try:
+            parsed = json.loads(source)
+            if isinstance(parsed, dict):
+                return parsed.get("url") or parsed.get("uri") or source
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return source
+
+
 def export(output_dir: Path, train_dir: Path, model_name: str, alias: str, tracking_uri: str) -> int:
     """Download the alias model, save model.keras, classes.json and MODEL_CARD.md."""
     import mlflow
@@ -45,8 +67,7 @@ def export(output_dir: Path, train_dir: Path, model_name: str, alias: str, track
     model.save(output_dir / "model.keras")
     (output_dir / "classes.json").write_text(json.dumps(class_names(train_dir)) + "\n")
     metric = run.data.tags.get("champion_metric", "validation_accuracy")
-    inputs = run.inputs.dataset_inputs if run.inputs else []
-    dataset_source = inputs[0].dataset.source if inputs else "not recorded"
+    dataset_source = dataset_reference(run)
     (output_dir / "MODEL_CARD.md").write_text(
         MODEL_CARD_TEMPLATE.format(
             model_name=model_name, alias=alias, version=version.version, run_id=version.run_id,
