@@ -4,7 +4,7 @@
 # Ports and credentials come from infra/.env (see infra/.env.example).
 services:
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-06-13T11-33-47Z
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -21,7 +21,7 @@ services:
       retries: 20
 
   lakefs:
-    image: treeverse/lakefs:1
+    image: treeverse/lakefs:1.87.0
     # Run as root: the named volume mount point at /home/lakefs/lakefs/metadata is created
     # root-owned (0:0, 0755) by the Docker engine on this host, since that path does not
     # pre-exist in the image; the image's default lakefs user (uid 100) cannot write to it
