@@ -12,7 +12,12 @@ from urllib.request import urlopen
 from jinja2 import Template
 import yaml
 
-from model_deployment import DeploymentError, ResolvedModel, safe_resource_name
+from model_deployment import (
+    DeploymentError,
+    ResolvedModel,
+    exception_message,
+    safe_resource_name,
+)
 from model_deployment.config import DeploymentSettings
 from model_deployment.monitoring import wait_compose_prometheus_target
 
@@ -200,14 +205,16 @@ def preflight_compose(
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
         raise DeploymentError(
             "PREREQUISITE_UNREACHABLE",
-            "Docker daemon is not available to the deployment host.",
+            "Docker daemon is not available to the deployment host: "
+            f"{exception_message(exc)}",
         ) from exc
     try:
         run_cmd(["docker", "compose", "version"], check=True, capture_output=True, text=True)
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
         raise DeploymentError(
             "PREREQUISITE_MISSING",
-            "Docker Compose v2 plugin is not available. Install/enable 'docker compose'.",
+            "Docker Compose v2 plugin is not available. Install/enable 'docker compose': "
+            f"{exception_message(exc)}",
         ) from exc
 
     load_template("compose.yaml.j2")
@@ -228,7 +235,7 @@ def preflight_compose(
     except OSError as exc:
         raise DeploymentError(
             "PREREQUISITE_MISSING",
-            f"Compose runtime directory is not writable: {root}",
+            f"Compose runtime directory is not writable: {root}: {exception_message(exc)}",
         ) from exc
 
 
@@ -269,7 +276,7 @@ def wait_compose_service_running(
                 return
             last_detail = f"running services: {', '.join(sorted(running)) or 'none'}"
         except Exception as exc:
-            last_detail = str(exc)
+            last_detail = exception_message(exc)
         sleep_fn(settings.poll_interval_seconds)
     raise DeploymentError(
         "DEPLOYMENT_TIMEOUT",
@@ -303,7 +310,7 @@ def wait_compose_model_ready(
                         return
                     last_detail = f"/health returned HTTP {getattr(response, 'status', '?')}"
         except Exception as exc:
-            last_detail = str(exc)
+            last_detail = exception_message(exc)
         sleep_fn(settings.poll_interval_seconds)
     raise DeploymentError(
         "DEPLOYMENT_TIMEOUT",
@@ -334,7 +341,7 @@ def deploy_compose(
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
         raise DeploymentError(
             "DEPLOYMENT_SUBMISSION_FAILED",
-            f"Could not start Docker Compose project '{project}'.",
+            f"Could not start Docker Compose project '{project}': {exception_message(exc)}",
         ) from exc
     if wait_ready:
         wait_compose_model_ready(settings, project, compose_file, run_cmd=run_cmd)
@@ -422,7 +429,7 @@ def teardown_compose_project(
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
         raise DeploymentError(
             "TEARDOWN_FAILED",
-            f"Could not stop Docker Compose project '{project_name}'.",
+            f"Could not stop Docker Compose project '{project_name}': {exception_message(exc)}",
         ) from exc
     return (
         f"Stopped Docker Compose project {project_name}. "

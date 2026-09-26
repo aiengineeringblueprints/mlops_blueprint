@@ -10,6 +10,7 @@ from typing import Optional, Sequence
 
 from model_deployment import DeploymentError, DeploymentPlan, DeploymentResult, stable_deployment_name
 from model_deployment.champion import resolve_model_version
+from model_deployment.local_model import resolve_local_model
 from model_deployment.config import VALID_TARGETS, load_environment, load_settings, request_from_environment
 from model_deployment.container import build_image, image_tag
 from model_deployment.deployments import TARGET_ADAPTERS
@@ -19,21 +20,24 @@ from model_deployment.deployments.docker_compose import (
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
-load_environment(os.path.join(ROOT, ".env"))
+ENV_FILE = os.path.join(HERE, ".env")
+load_environment(ENV_FILE)
 
 logger = logging.getLogger(__name__)
 
 
 def resolve_args(argv: Optional[Sequence[str]] = None):
     """Parse CLI options and merge them with deployment environment configuration."""
-    load_environment(os.path.join(ROOT, ".env"))
-    parser = argparse.ArgumentParser(description="Deploy a registered MLflow model.")
+    load_environment(ENV_FILE)
+    parser = argparse.ArgumentParser(description="Deploy an MLflow-registered model or supported standalone local model.")
     parser.add_argument("--backend", "--target", dest="target", choices=VALID_TARGETS)
     parser.add_argument("--model-name")
     parser.add_argument("--tracking-uri")
     parser.add_argument("--model-version", help="Explicit registered version override")
     parser.add_argument("--model-alias", help="Alias used when no explicit version is supplied")
+    parser.add_argument("--local-model-path", help="Standalone local model file; bypasses MLflow when set")
+    parser.add_argument("--local-model-format", help="Local format override; default is auto detection")
+    parser.add_argument("--local-model-name", help="Optional deployment name for a standalone local model")
     parser.add_argument("--dry-run", action="store_true", help="Resolve and log the deployment plan only")
     args = parser.parse_args(argv)
     return request_from_environment(
@@ -42,6 +46,9 @@ def resolve_args(argv: Optional[Sequence[str]] = None):
         tracking_uri=args.tracking_uri,
         version=args.model_version,
         alias=args.model_alias,
+        local_model_path=args.local_model_path,
+        local_model_format=args.local_model_format,
+        local_model_name=args.local_model_name,
         dry_run=args.dry_run,
     )
 
@@ -134,18 +141,37 @@ def run(request) -> DeploymentResult | DeploymentPlan:
         logger.info("stage=preflight target=%s backend=%s", request.target, adapter.name)
         adapter.preflight(settings)
 
-    logger.info(
-        "stage=model_resolution model=%s target=%s requested=%s",
-        request.model_name,
-        request.target,
-        f"version:{request.version}" if request.version else f"alias:{request.alias}",
-    )
-    resolved = resolve_model_version(
-        request.model_name,
-        request.tracking_uri,
-        request.version,
-        alias=request.alias,
-    )
+    if request.local_model_path:
+        logger.info(
+            "stage=model_resolution source=local model=%s target=%s path=%s format=%s",
+            request.model_name,
+            request.target,
+            request.local_model_path,
+            request.local_model_format,
+        )
+        resolved = resolve_local_model(
+            request.local_model_path,
+            model_name=request.model_name,
+            model_format=request.local_model_format,
+        )
+    else:
+        logger.info(
+            "stage=model_resolution source=mlflow model=%s target=%s requested=%s",
+            request.model_name,
+            request.target,
+            f"version:{request.version}" if request.version else f"alias:{request.alias}",
+        )
+        if not request.model_name or not request.tracking_uri:
+            raise DeploymentError(
+                "CONFIGURATION_MISSING",
+                "MLflow deployment requires MODEL_NAME and TRACKING_URI when LOCAL_MODEL_PATH is not set.",
+            )
+        resolved = resolve_model_version(
+            request.model_name,
+            request.tracking_uri,
+            request.version,
+            alias=request.alias,
+        )
     plan = build_plan(request, settings, resolved)
     if request.dry_run:
         logger.info(
@@ -171,6 +197,8 @@ def run(request) -> DeploymentResult | DeploymentPlan:
         platform=settings.docker_platform,
         push=push_image,
         image_name=(settings.kube_deployment_name if request.target == "kubernetes" else None),
+        source_type=resolved.source_type,
+        model_format=resolved.model_format,
     )
 
     logger.info(
