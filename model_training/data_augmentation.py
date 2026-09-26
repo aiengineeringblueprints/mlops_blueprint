@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import numpy as np
 import logging
 from tensorflow.keras.preprocessing.image import (
@@ -10,6 +11,7 @@ from PIL import Image
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+MODEL_TRAINING_ROOT = Path(__file__).resolve().parent
 
 
 def perform_data_augmentation(data_path, num_augmented_images_per_original):
@@ -73,4 +75,4 @@ def perform_data_augmentation(data_path, num_augmented_images_per_original):
 
 if __name__ == "__main__":
     # Execute data augmentation
-    perform_data_augmentation("data/train", num_augmented_images_per_original=5)
+    perform_data_augmentation(str(MODEL_TRAINING_ROOT / "data" / "train"), num_augmented_images_per_original=5)

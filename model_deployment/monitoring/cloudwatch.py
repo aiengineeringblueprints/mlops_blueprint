@@ -1,7 +1,7 @@
 """Amazon CloudWatch operational monitoring for SageMaker deployments."""
 from __future__ import annotations
 
-from model_deployment import DeploymentError
+from model_deployment import DeploymentError, exception_message
 from model_deployment.config import DeploymentSettings
 
 
@@ -37,6 +37,6 @@ def configure_sagemaker_monitoring(
     except Exception as exc:
         raise DeploymentError(
             "MONITORING_CONFIGURATION_FAILED",
-            f"Could not configure CloudWatch alarm for '{endpoint}': {exc}",
+            f"Could not configure CloudWatch alarm for '{endpoint}': {exception_message(exc)}",
         ) from exc
     return f"CloudWatch alarm {endpoint}-high-latency"

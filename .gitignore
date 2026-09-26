@@ -4,7 +4,7 @@
 !.env.example
 
 # LakeFS local data
-data/*
+# model_training/data/*
 
 # Python / local runtime
 __pycache__/
@@ -28,8 +28,8 @@ env/
 *.egg-info/
 
 # Generated training outputs
-model/
-metrics/
+model_training/model/
+model_training/metrics/
 
 # Logs / coverage / editor files
 *.log

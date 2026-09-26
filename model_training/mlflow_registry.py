@@ -3,9 +3,17 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
+from pathlib import Path
 from typing import Optional, Tuple
 from dotenv import load_dotenv
-from model_deployment.champion import ChampionProvenanceError, validate_champion_provenance
+
+MODEL_TRAINING_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = MODEL_TRAINING_ROOT.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from model_training.champion_validation import ChampionProvenanceError, validate_champion_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +226,7 @@ def register_champion(
 
 def parse_args(argv=None):
     """Read registry command-line arguments and environment defaults."""
-    load_dotenv()
+    load_dotenv(MODEL_TRAINING_ROOT / ".env", override=False)
     parser = argparse.ArgumentParser(description="Register/reuse the tagged champion in MLflow Model Registry.")
     parser.add_argument("--experiment", default=os.getenv("EXPERIMENT_NAME"))
     parser.add_argument("--model-name", default=os.getenv("MODEL_NAME"))
@@ -235,7 +243,7 @@ def parse_args(argv=None):
 
 def main(argv=None) -> int:
     """Run champion registration and return a CLI exit code."""
-    load_dotenv()
+    load_dotenv(MODEL_TRAINING_ROOT / ".env", override=False)
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
     args = parse_args(argv)
     try:

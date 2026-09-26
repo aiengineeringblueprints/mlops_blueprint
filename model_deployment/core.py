@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 import re
+import subprocess
 from typing import Any, Dict, Optional
 
 
@@ -12,22 +13,26 @@ class DeploymentRequest:
     """User request resolved from CLI arguments and environment configuration."""
 
     target: str
-    model_name: str
-    tracking_uri: str
+    model_name: Optional[str]
+    tracking_uri: Optional[str]
     version: Optional[str] = None
     alias: str = "champion"
     dry_run: bool = False
+    local_model_path: Optional[str] = None
+    local_model_format: str = "auto"
 
 
 @dataclass(frozen=True)
 class ResolvedModel:
-    """Registered-model version selected for deployment."""
+    """Model artifact selected for deployment from MLflow or a local file."""
 
     name: str
     version: str
     source: str
     run_id: Optional[str]
     alias: Optional[str]
+    source_type: str = "mlflow"
+    model_format: str = "mlflow"
 
 
 @dataclass(frozen=True)
@@ -81,6 +86,43 @@ class DeploymentResult:
     def as_dict(self) -> Dict[str, Any]:
         """Convert the deployment result to a plain dictionary."""
         return asdict(self)
+
+
+def exception_message(exc: BaseException) -> str:
+    """Return a concise underlying exception message suitable for CLI errors."""
+    if isinstance(exc, subprocess.CalledProcessError):
+        candidates = (getattr(exc, "stderr", None), getattr(exc, "stdout", None))
+    else:
+        candidates = (str(exc),)
+
+    keywords = (
+        "error",
+        "failed",
+        "failure",
+        "denied",
+        "not found",
+        "unhealthy",
+        "already allocated",
+        "cannot",
+        "could not",
+        "reason",
+        "invalid",
+        "timeout",
+    )
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        lines = [line.strip() for line in str(candidate).splitlines() if line.strip()]
+        if not lines:
+            continue
+        for line in reversed(lines):
+            if any(keyword in line.lower() for keyword in keywords):
+                return line[:800]
+        return lines[-1][:800]
+
+    fallback = str(exc).strip()
+    return (fallback or exc.__class__.__name__)[:800]
 
 
 class DeploymentError(RuntimeError):

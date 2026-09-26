@@ -1,0 +1,12 @@
+# Deployment-host dependencies.
+# Native model runtimes (TensorFlow, ONNX Runtime, PyTorch, XGBoost, etc.) are
+# installed inside the generated serving image only when their model format needs them.
+mlflow>=3,<4
+kubernetes>=29,<35
+boto3>=1.34,<2
+PyYAML>=6,<7
+Jinja2>=3.1,<4
+python-dotenv>=1,<2
+numpy>=1.26,<2.3
+pillow>=10,<13
+httpx>=0.27,<1

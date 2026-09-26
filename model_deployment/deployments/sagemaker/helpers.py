@@ -8,6 +8,7 @@ from typing import Optional
 from model_deployment import (
     DeploymentError,
     ResolvedModel,
+    exception_message,
     short_fingerprint,
     stable_deployment_name,
     versioned_artifact_name,
@@ -46,7 +47,7 @@ def wait_sagemaker_ready(
         except Exception as exc:
             raise DeploymentError(
                 "DEPLOYMENT_FAILED",
-                f"Could not inspect SageMaker endpoint '{endpoint_name}': {exc}",
+                f"Could not inspect SageMaker endpoint '{endpoint_name}': {exception_message(exc)}",
             ) from exc
         last_status = description.get("EndpointStatus", "Unknown")
         if last_status == "InService":
@@ -109,7 +110,7 @@ def reconcile_sagemaker_endpoint(
         if not is_sagemaker_not_found(exc):
             raise DeploymentError(
                 "DEPLOYMENT_SUBMISSION_FAILED",
-                f"Could not inspect SageMaker model '{aws_model_name}': {exc}",
+                f"Could not inspect SageMaker model '{aws_model_name}': {exception_message(exc)}",
             ) from exc
         logger.info("Creating SageMaker Model '%s'", aws_model_name)
         try:
@@ -131,7 +132,7 @@ def reconcile_sagemaker_endpoint(
         except Exception as create_exc:
             raise DeploymentError(
                 "DEPLOYMENT_SUBMISSION_FAILED",
-                f"Could not create SageMaker model '{aws_model_name}': {create_exc}",
+                f"Could not create SageMaker model '{aws_model_name}': {exception_message(create_exc)}",
             ) from create_exc
 
     try:
@@ -141,7 +142,7 @@ def reconcile_sagemaker_endpoint(
         if not is_sagemaker_not_found(exc):
             raise DeploymentError(
                 "DEPLOYMENT_SUBMISSION_FAILED",
-                f"Could not inspect SageMaker EndpointConfig '{config_name}': {exc}",
+                f"Could not inspect SageMaker EndpointConfig '{config_name}': {exception_message(exc)}",
             ) from exc
         logger.info("Creating SageMaker EndpointConfig '%s'", config_name)
         try:
@@ -164,7 +165,7 @@ def reconcile_sagemaker_endpoint(
         except Exception as create_exc:
             raise DeploymentError(
                 "DEPLOYMENT_SUBMISSION_FAILED",
-                f"Could not create SageMaker EndpointConfig '{config_name}': {create_exc}",
+                f"Could not create SageMaker EndpointConfig '{config_name}': {exception_message(create_exc)}",
             ) from create_exc
 
     endpoint_exists = False
@@ -177,7 +178,7 @@ def reconcile_sagemaker_endpoint(
         if not is_sagemaker_not_found(exc):
             raise DeploymentError(
                 "DEPLOYMENT_SUBMISSION_FAILED",
-                f"Could not inspect SageMaker endpoint '{endpoint_name}': {exc}",
+                f"Could not inspect SageMaker endpoint '{endpoint_name}': {exception_message(exc)}",
             ) from exc
 
     try:
@@ -200,7 +201,7 @@ def reconcile_sagemaker_endpoint(
     except Exception as exc:
         raise DeploymentError(
             "DEPLOYMENT_SUBMISSION_FAILED",
-            f"Could not create/update SageMaker endpoint '{endpoint_name}': {exc}",
+            f"Could not create/update SageMaker endpoint '{endpoint_name}': {exception_message(exc)}",
         ) from exc
 
     wait_sagemaker_ready(
@@ -236,14 +237,14 @@ def teardown_sagemaker(
         if get_client_error_code(exc) not in {"ValidationException", "ResourceNotFound"}:
             raise DeploymentError(
                 "TEARDOWN_FAILED",
-                f"Could not delete SageMaker endpoint '{endpoint}': {exc}",
+                f"Could not delete SageMaker endpoint '{endpoint}': {exception_message(exc)}",
             ) from exc
     try:
         cw.delete_alarms(AlarmNames=[alarm])
     except Exception as exc:
         raise DeploymentError(
             "TEARDOWN_FAILED",
-            f"Could not delete CloudWatch alarm '{alarm}': {exc}",
+            f"Could not delete CloudWatch alarm '{alarm}': {exception_message(exc)}",
         ) from exc
     return (
         f"Deleted exact SageMaker endpoint {endpoint} and CloudWatch alarm {alarm}. "

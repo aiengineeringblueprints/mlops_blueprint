@@ -1,9 +1,11 @@
 import subprocess
 import sys
 import logging
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+MODEL_TRAINING_ROOT = Path(__file__).resolve().parent
 
 
 def run_command(command, shell=False):
@@ -13,7 +15,7 @@ def run_command(command, shell=False):
     )
     try:
         result = subprocess.run(
-            command, shell=shell, check=True, capture_output=True, text=True
+            command, shell=shell, check=True, capture_output=True, text=True, cwd=MODEL_TRAINING_ROOT
         )
         if result.stdout.strip():
             logger.info(result.stdout.strip())
