@@ -158,7 +158,7 @@ MODEL_VERSION=
 
 `MODEL_VERSION` is optional. When it is empty, the blueprint resolves `MODEL_ALIAS` and validates champion provenance. When an explicit version is supplied, that exact registered version is used.
 
-If MLflow stores artifacts in an S3-compatible service such as MinIO, also set:
+If MLflow stores artifacts in an S3-compatible service such as SeaweedFS or AWS S3, also set:
 
 ```env
 MLFLOW_S3_ENDPOINT_URL=http://<host>:<port>

@@ -13,7 +13,7 @@ cp model_training/.env.example model_training/.env
 ```
 
 The training scripts load `model_training/.env` explicitly. Training data and generated `model/` and `metrics/` outputs are resolved relative to the `model_training/` directory, so the scripts can be launched from the repository root.
-`mc` and `lakectl` are external command-line prerequisites for the LakeFS/MinIO helper scripts; they are not installed by `model_training/requirements.txt`.
+`lakectl` is an external command-line prerequisite for the LakeFS helper scripts; it is not installed by `model_training/requirements.txt`.
 
 Typical commands are:
 
@@ -29,12 +29,14 @@ The manual LakeFS shell commands in the sections below assume `cd model_training
 
 ## Run the whole workflow locally
 
-The infrastructure (MinIO, LakeFS, MLflow server) is one Compose stack:
+The infrastructure (SeaweedFS, LakeFS, MLflow server) is one Compose stack. The bundled
+SeaweedFS S3 store runs only under the `local-s3` profile:
 
-    cd model_training/infra && docker compose up -d --wait
+    cd model_training/infra && docker compose --profile local-s3 up -d --wait
 
-`lakectl` and `mc` read their endpoints and credentials from `model_training/.env`
-(`LAKECTL_*`, `MC_HOST_*`), so no `lakectl config` or `mc alias set` is needed.
+`lakectl` reads its endpoint and credentials from `model_training/.env` (`LAKECTL_*`), so no
+`lakectl config` is needed. Licences: SeaweedFS Apache-2.0, LakeFS 1.86.0 Apache-2.0 (last
+release before the Business Source License), MLflow Apache-2.0.
 The complete sequence, from raw data to an exported champion model:
 
     python model_training/setup_lakefs.py            # bucket, repository, initial data commit
@@ -48,40 +50,46 @@ The complete sequence, from raw data to an exported champion model:
 `model_training/test/smoke_train.sh` runs exactly this sequence in a temporary copy and
 checks the result through the MLflow REST API.
 
+## Using an existing S3
+
+To point the stack at an existing S3-compatible service (AWS, a company endpoint) instead of
+the bundled SeaweedFS, set `S3_*` in both `infra/.env` and `model_training/.env`
+(`S3_ENDPOINT`/`S3_HOST_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`,
+`S3_BUCKET`, and, if the presigned URLs LakeFS/`lakectl` hand out need a different host,
+`S3_PRESIGNED_ENDPOINT`). Leave `S3_ENDPOINT` empty to select AWS. Start the stack without the
+`local-s3` profile:
+
+    cd model_training/infra && docker compose up -d --wait
+
+`setup_lakefs.py` creates the bucket if it is missing (`s3:CreateBucket` on the configured
+credentials); if company policy withholds that permission, pre-create the bucket out of band
+and grant only read/write/list on it instead.
+
 ## Infrastructure Setup
 
-Follow steps 0 and 1 from https://github.com/aiengineeringblueprints/lakefs_demo to set up LakeFS and MinIO.
+Follow steps 0 and 1 from https://github.com/aiengineeringblueprints/lakefs_demo to set up LakeFS and an S3-compatible store.
 
-## Setup of the MinIO Bucket and LakeFS Repository (automated in setup_lakefs.py)
+## Setup of the S3 Bucket and LakeFS Repository (automated in setup_lakefs.py)
 
-1. Create MinIO bucket:
-
-```bash
-mc mb localminio/anomaly-detection
-```
+1. Create the S3 bucket (SeaweedFS or any other S3-compatible endpoint), idempotently, via boto3.
 
 2. Create LakeFS repository:
 
 ```bash
-lakectl repo create lakefs://anomaly-detection-data s3://anomaly-detection
+lakectl repo create lakefs://anomaly-detection-data s3://anomaly-detection/anomaly-detection-data
 ```
 
-3. Transfer local dataset to MinIO bucket:
-
-```bash
-mc cp ./data/ lakefs/anomaly-detection-data/main/data --recursive
-```
-
-4. Initialize local LakeFS repository:
+3. Link the local data folder to the LakeFS branch path:
 
 ```bash
 lakectl local init lakefs://anomaly-detection-data/main/data data
 ```
 
-5. Commit the initial version in LakeFS:
+4. Commit the initial version in LakeFS; `lakectl` uploads the local files itself, so no
+   separate S3 client is needed on the host:
 
 ```bash
-lakectl commit lakefs://anomaly-detection-data/main -m "Commit initial data version"
+lakectl local commit data -m "Commit initial data version"
 ```
 
 ## Preparation of a new branch for data augmentation (automated in prepare_lakefs_branch.py)

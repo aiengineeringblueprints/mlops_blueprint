@@ -2,7 +2,7 @@
 # End-to-end smoke test of the training workflow: infra stack up, data versioned in LakeFS,
 # training tracked in MLflow, champion registered and exported. Usage:
 #   model_training/test/smoke_train.sh [work-dir]
-# Needs: docker compose v2, python venv with model_training/requirements.txt active, lakectl, mc.
+# Needs: docker compose v2, python venv with model_training/requirements.txt active, lakectl.
 set -euo pipefail
 export GIT_AUTHOR_NAME=smoke GIT_AUTHOR_EMAIL=smoke@local GIT_COMMITTER_NAME=smoke GIT_COMMITTER_EMAIL=smoke@local
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,7 +11,7 @@ WORK="${1:-$(mktemp -d /tmp/smoke-train-XXXX)}"
 PROJECT="smoke-train-$$"
 export COMPOSE_PROJECT_NAME="$PROJECT"
 
-cleanup() { ( cd "$MT/infra" && docker compose down -v --remove-orphans ) >/dev/null 2>&1 || true; }
+cleanup() { ( cd "$MT/infra" && docker compose --profile local-s3 down -v --remove-orphans ) >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 # A copy of model_training with data, inside a git repository (lakectl local needs one).
@@ -21,7 +21,7 @@ rm -rf "$WORK/model_training/model" "$WORK/model_training/metrics" "$WORK/model_
 cp "$MT/.env.example" "$WORK/model_training/.env"
 ( cd "$WORK" && git init -q && git add -A && git -c user.name=smoke -c user.email=smoke@local commit -qm "smoke workspace" )
 
-( cd "$MT/infra" && docker compose up -d --wait )
+( cd "$MT/infra" && docker compose --profile local-s3 up -d --wait )
 
 cd "$WORK"
 python model_training/setup_lakefs.py
