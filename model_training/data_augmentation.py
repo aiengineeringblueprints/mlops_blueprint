@@ -51,22 +51,16 @@ def perform_data_augmentation(data_path, num_augmented_images_per_original):
             # Load image
             img = load_img(image_path)
             img_array = img_to_array(img)
-            img_array = np.expand_dims(img_array, axis=0)
 
-            # Generate augmented images
-            for j, batch in enumerate(train_datagen.flow(img_array, batch_size=1)):
-                # Create filename with "_Augmented" suffix
-                name, ext = os.path.splitext(image_file)
-                augmented_filename = f"{name}_Augmented_{j}{ext}"
-                augmented_path = os.path.join(class_path, augmented_filename)
-
-                # Save augmented image (use PIL instead of plt.imsave)
-                img_to_save = (batch[0]).astype(np.uint8)
-                Image.fromarray(img_to_save).save(augmented_path)
+            # Generate augmented images. random_transform() works on the single array; a
+            # flow() iterator per image would keep a full-resolution float32 copy alive
+            # until the cyclic GC runs (about 140 MB per 4032x3024 image).
+            name, ext = os.path.splitext(image_file)
+            for j in range(num_augmented_images_per_original):
+                augmented = train_datagen.random_transform(img_array)
+                augmented_path = os.path.join(class_path, f"{name}_Augmented_{j}{ext}")
+                Image.fromarray(augmented.astype(np.uint8)).save(augmented_path)
                 augmented_count += 1
-
-                if j >= num_augmented_images_per_original - 1:
-                    break
 
         logger.info(f"    {augmented_count} augmented images created")
 
