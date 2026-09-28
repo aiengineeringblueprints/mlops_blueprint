@@ -1,7 +1,7 @@
 # MLOps Blueprint for Model Training, Deployment, and Monitoring
 
 <p align="center">
-  <img src="assets/mlops_blueprint_main.png"
+  <img src="assets/mlops_blueprint.png"
        alt="MLOps Reference Architecture"
        width="900">
 </p>
