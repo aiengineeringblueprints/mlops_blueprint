@@ -1,46 +1,57 @@
 # model_training/infra/docker-compose.yml
-# Local infrastructure for the training workflow: object storage (MinIO), data versioning
-# (LakeFS on top of MinIO) and experiment tracking / model registry (MLflow server).
-# Ports and credentials come from infra/.env (see infra/.env.example).
+# Infrastructure for the training workflow: an S3-compatible object store, data versioning
+# (LakeFS) on top of it, and experiment tracking / model registry (MLflow).
+#
+# Object store: the bundled SeaweedFS runs only with the profile "local-s3":
+#   docker compose --profile local-s3 up -d --wait
+# To use an existing S3 (AWS, a company endpoint), set S3_* in infra/.env and start
+# without the profile; no code changes are needed.
+# Licences: SeaweedFS Apache-2.0, LakeFS 1.86.0 Apache-2.0 (last release before the
+# Business Source License), MLflow Apache-2.0.
 services:
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-06-13T11-33-47Z
-    command: ["server", "/data", "--console-address", ":9001"]
+  seaweedfs:
+    profiles: ["local-s3"]
+    image: chrislusf/seaweedfs:4.47
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /tmp/s3.json <<JSON
+        {"identities": [{"name": "admin",
+          "credentials": [{"accessKey": "$${S3_ACCESS_KEY_ID}", "secretKey": "$${S3_SECRET_ACCESS_KEY}"}],
+          "actions": ["Admin", "Read", "Write", "List", "Tagging"]}]}
+        JSON
+        exec weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-seaweedadmin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-seaweedadmin-secret}
     ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${S3_PORT:-8333}:8333"
     volumes:
-      - minio-data:/data
+      - seaweedfs-data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8333/healthz >/dev/null || exit 1"]
       interval: 5s
       timeout: 5s
-      retries: 20
+      retries: 30
 
   lakefs:
-    image: treeverse/lakefs:1.87.0
-    # Run as root: the named volume mount point at /home/lakefs/lakefs/metadata is created
-    # root-owned (0:0, 0755) by the Docker engine on this host, since that path does not
-    # pre-exist in the image; the image's default lakefs user (uid 100) cannot write to it
-    # otherwise, causing "Cannot write pid file ... permission denied" on startup.
-    user: "0:0"
+    image: treeverse/lakefs:1.86.0
+    user: "0:0"   # the named volume's mount point is root-owned on some hosts
     depends_on:
-      minio:
+      seaweedfs:
         condition: service_healthy
+        required: false   # absent when an external S3 is used
     environment:
       LAKEFS_DATABASE_TYPE: local
       LAKEFS_BLOCKSTORE_TYPE: s3
-      LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE: "true"
-      LAKEFS_BLOCKSTORE_S3_ENDPOINT: http://minio:9000
-      # lakectl/mc run on the host, not on this Compose network, so object downloads via
-      # presigned URLs (e.g. "lakectl local checkout") must resolve against the host-mapped
-      # MinIO port, not the internal "minio" hostname used for server-to-server calls above.
-      LAKEFS_BLOCKSTORE_S3_PRE_SIGNED_ENDPOINT: http://127.0.0.1:${MINIO_PORT:-9000}
-      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LAKEFS_BLOCKSTORE_S3_ENDPOINT: ${S3_ENDPOINT:-http://seaweedfs:8333}
+      LAKEFS_BLOCKSTORE_S3_REGION: ${S3_REGION:-us-east-1}
+      LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-seaweedadmin}
+      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-seaweedadmin-secret}
+      # Host-run clients (lakectl local, boto3) download through presigned URLs, which must
+      # name an address the host can reach; with an external S3 this is its public endpoint.
+      LAKEFS_BLOCKSTORE_S3_PRE_SIGNED_ENDPOINT: ${S3_PRESIGNED_ENDPOINT:-http://127.0.0.1:8333}
       LAKEFS_AUTH_ENCRYPT_SECRET_KEY: local-development-only
       LAKEFS_STATS_ENABLED: "false"
       LAKEFS_INSTALLATION_USER_NAME: admin
@@ -81,6 +92,6 @@ services:
       retries: 30
 
 volumes:
-  minio-data:
+  seaweedfs-data:
   lakefs-data:
   mlflow-data:
