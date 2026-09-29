@@ -65,31 +65,17 @@ Implementation note: the thesis runs MLflow as a local server (SQLite, artifacts
 
 ### 3.2 Component and flow diagram
 
-```mermaid
-flowchart LR
-    subgraph Storage
-        S3[(S3-compatible object store<br/>SeaweedFS or existing S3)]
-    end
-    subgraph DataVersioning[Data versioning]
-        LFS[LakeFS repository<br/>branches main / augmented<br/>commit ID = data version]
-        LOCAL[Local checkout data/<br/>.lakefs_ref.yaml]
-    end
-    GIT[Git repository<br/>code + data reference]
-    subgraph Tracking[Experiment tracking and model management]
-        TRAIN[Training code<br/>train.py]
-        MLF[MLflow tracking server<br/>params, metrics, dataset input,<br/>git commit, model artifact]
-        REG[MLflow Model Registry<br/>version + alias champion]
-    end
-    EXP[Export<br/>model.keras, classes.json,<br/>MODEL_CARD.md]
+![Saur 2026, Figure 4.8: structure and interplay of LakeFS and MLflow](figures/saur-2026-fig-4-8-lakefs-mlflow.png)
 
-    LFS -- blockstore --> S3
-    LOCAL <-- lakectl local commit / checkout --> LFS
-    LOCAL -- data reference --> GIT
-    LOCAL -- train / val / test --> TRAIN
-    TRAIN -- log run incl. lakefs://repo/commit --> MLF
-    MLF -- champion run --> REG
-    REG -- models:/name@champion --> EXP
-```
+*Saur 2026, Figure 4.8 (original German caption: "Aufbau und Zusammenspiel von LakeFS und MLflow").*
+The LakeFS repository ("Anomaly-Detection-Data") keeps its data in an S3 bucket ("Anomaly Detection")
+and provides the versioned input dataset for training; the MLflow tracking server stores run
+metadata in an SQLite database and run artifacts in its MLRuns directory. The training code and
+the Git repository (not drawn) connect the two: a run logs the LakeFS commit as its dataset input.
+
+Implementation note: the figure shows MinIO as the object store; the bundled store is now SeaweedFS
+(any S3-compatible endpoint works), and MLflow's artifacts live in the tracking server's container
+volume.
 
 ### 3.3 Requirement-to-component mapping
 
@@ -113,6 +99,19 @@ The ratings are the thesis's evaluation on its three-level scale (`++` fully met
 | GA_6 | LakeFS, MLflow | ++ / + | |
 
 ## 4. Workflow
+
+![Saur 2026, Figure 4.9: steps and scripts from local data to a committed, augmented dataset](figures/saur-2026-fig-4-9-data-versioning-workflow.png)
+
+*Saur 2026, Figure 4.9 (original German caption: "Ablauf bei der Erzeugung der augmentierten Bilddaten").*
+Four scripts move the data through LakeFS: `setup_lakefs.py` creates the bucket and the LakeFS
+repository, copies the local `data/` into it, initialises the local checkout and commits;
+`prepare_lakefs_branch.py` creates the branch `augmented` and checks it out; `data_augmentation.py`
+(or any other preprocessing script) writes the augmented images; `commit_lakefs.py` commits the
+processed dataset, optionally merges it into `main` and checks `main` out again, and commits the
+current data reference to Git.
+
+Implementation note: the figure lists `mc` (MinIO client) commands; the implementation creates the
+bucket with boto3 and uploads through `lakectl local commit`, so no object-store client is needed.
 
 The workflow leads from raw data to an exported champion model. File references are relative to `model_training/`. All tools are configured through environment variables (`.env`, `infra/.env`), not by editing code.
 
@@ -148,6 +147,14 @@ Implementation note: the thesis's training script `main_seitlich.py` is split in
 - *Consequences:* The project operates its own servers. Kubeflow remains sensible where Kubernetes already exists.
 
 **ADR-2: LakeFS for data versioning in the large-data variant**
+
+![Saur 2026, Figure 4.6: DVC set-up with the copy variant from cache to workspace](figures/saur-2026-fig-4-6-dvc-copy-setup.png)
+
+*Saur 2026, Figure 4.6 (original German caption: "DVC-Setup mit Copy-Variante von Cache zum Workspace").*
+With DVC's copy variant every user keeps each data version both in a local cache and in the
+workspace (here two users with 2 × 300 GB each in cache and workspace next to 3 × 300 GB in remote
+storage), so the storage demand multiplies to 2.4 TB for 300 GB of data.
+
 - *Context:* With larger datasets DVC keeps data both in its cache and in the workspace, increasing storage demand; local or repository-based approaches reach their limits.
 - *Decision:* LakeFS versions data directly on the object store with Git concepts and without duplication, scales to very large volumes, and offers a web UI, user management and APIs.
 - *Consequences:* DV_1, DV_3, DV_4 are fully met; no data catalog (DV_5), only partial lineage (DV_2), no tracking or model management, so it must be combined with another tool. Setup effort is higher (own server plus object store).
