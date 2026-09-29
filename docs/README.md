@@ -15,3 +15,6 @@ the theses the blueprint is based on (Saur 2026, training; Kachhadiya 2026, depl
 
 Paths are relative to the root of the blueprint, the directory that contains `model_training/`,
 `model_deployment/` and this `docs/` directory.
+
+The figures in `figures/` are the original figures of the two theses, reproduced unchanged with their
+source; captions and implementation notes explain where the current implementation differs.

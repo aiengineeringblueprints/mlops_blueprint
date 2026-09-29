@@ -82,48 +82,21 @@ The architecture separates **common responsibilities** from **target-specific re
 
 ### 3.2 Component Interactions
 
-```mermaid
-flowchart LR
-  subgraph Upstream["Model lifecycle (upstream, out of scope)"]
-    TR[Training and experiment tracking] --> REG[(MLflow Model Registry<br/>alias / version)]
-  end
-  LOCAL[/Standalone local model file/]
+![Kachhadiya 2026, Figure 5.1: reference architecture and implementation overview](figures/kachhadiya-2026-fig-5-1-reference-architecture.jpg)
 
-  subgraph Prep["Deployment preparation (common)"]
-    CFG[Configuration and validation] --> RES[Model resolution<br/>common internal representation]
-    REG --> RES
-    LOCAL --> RES
-    RES --> PLAN[Deployment plan<br/>dry-run boundary]
-    PLAN --> PKG[Artifact preparation<br/>Docker image + shared serving app]
-    PKG --> CTRL[Deployment control<br/>backend dispatch]
-  end
+*Kachhadiya 2026, Figure 5.1: reference architecture and implementation overview.*
+Five lanes from left to right: **Data Management** (data, object store, LakeFS); **Model
+Lifecycle** (model training, experiment tracking, tagging the champion, registering the model in
+MLflow); **Deployment Preparation** (fetching the model from the registry or a local path,
+building the Docker image, deploying); **Deployment Targets** (AWS SageMaker with a SageMaker
+endpoint, Kubernetes with a KServe endpoint, Docker Compose with a ModelService endpoint); and
+**Monitoring** (Amazon CloudWatch for SageMaker, Prometheus and Grafana for Kubernetes and,
+optionally, Docker Compose).
 
-  subgraph Targets["Deployment targets (target-specific)"]
-    SM[AWS SageMaker endpoint]
-    KS[Kubernetes / KServe InferenceService]
-    DC[Docker Compose model-service]
-  end
-  CTRL --> SM
-  CTRL --> KS
-  CTRL --> DC
+Implementation note: the figure shows MinIO as the object store; the training part now bundles
+SeaweedFS (any S3-compatible endpoint works).
 
-  subgraph Mon["Monitoring"]
-    CW[Amazon CloudWatch]
-    PROM[Prometheus] --> GRAF[Grafana]
-    MDM[Model/data monitoring<br/>extension boundary]
-  end
-  SM --> CW
-  KS -- PodMonitor --> PROM
-  DC -- /metrics scrape, optional --> PROM
-  SM -.-> MDM
-  KS -.-> MDM
-  DC -.-> MDM
-  CW -. feedback interface .-> REG
-  GRAF -. feedback interface .-> REG
-  MDM -. feedback interface .-> REG
-```
-
-Dashed edges are extension points, not implemented flows.
+The arrow marked "Optional" is the operational monitoring of the Docker Compose target, which is optional there.
 
 ### 3.3 Mapping of Architectural Requirements to Components
 
