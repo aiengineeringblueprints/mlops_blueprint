@@ -93,6 +93,38 @@ endpoint, Kubernetes with a KServe endpoint, Docker Compose with a ModelService 
 **Monitoring** (Amazon CloudWatch for SageMaker, Prometheus and Grafana for Kubernetes and,
 optionally, Docker Compose).
 
+Transcription of Figure 5.1 (same elements and labels):
+
+```mermaid
+flowchart LR
+    subgraph DM["Data Management"]
+        d1[Data] --> d2[MinIO] --> d3[LakeFS]
+    end
+    subgraph ML["Model Lifecycle"]
+        m1[Model Training] --> m2["MLflow: Experiment Tracking"] --> m3["Tag Model (Champion)"] --> m4["MLflow: Register Model"]
+    end
+    subgraph DP["Deployment Preparation"]
+        p1["Fetch Model From Registry or Local Path"] --> p2[Build Docker Image] --> p3[Deploy]
+    end
+    subgraph DT["Deployment Targets"]
+        t1[AWS SageMaker] --> e1[SageMaker Endpoint]
+        t2[Kubernetes] --> e2[KServe Endpoint]
+        t3[Docker Compose] --> e3[ModelService Endpoint]
+    end
+    subgraph MO["Monitoring"]
+        o1[Amazon CloudWatch]
+        o2["Prometheus + Grafana"]
+    end
+    d3 --> m1
+    m4 --> p1
+    p3 --> t1
+    p3 --> t2
+    p3 --> t3
+    e1 --> o1
+    e2 --> o2
+    e3 -. Optional .-> o2
+```
+
 Implementation note: the figure shows MinIO as the object store; the training part now bundles
 SeaweedFS (any S3-compatible endpoint works).
 

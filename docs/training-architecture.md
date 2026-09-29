@@ -73,6 +73,20 @@ and provides the versioned input dataset for training; the MLflow tracking serve
 metadata in an SQLite database and run artifacts in its MLRuns directory. The training code and
 the Git repository (not drawn) connect the two: a run logs the LakeFS commit as its dataset input.
 
+Transcription of Figure 4.8 (same elements and labels; German labels translated):
+
+```mermaid
+flowchart LR
+    subgraph LFS["LakeFS: LakeFS repository (#quot;Anomaly-Detection-Data#quot;)"]
+        B[("MinIO bucket (#quot;Anomaly Detection#quot;)")]
+    end
+    subgraph MLF["MLflow: MLflow tracking server"]
+        DB[("SQLite database (metadata)")]
+        AR["MLRuns directory (artifacts)"]
+    end
+    LFS -- "input dataset for training" --> MLF
+```
+
 Implementation note: the figure shows MinIO as the object store; the bundled store is now SeaweedFS
 (any S3-compatible endpoint works), and MLflow's artifacts live in the tracking server's container
 volume.
@@ -109,6 +123,28 @@ repository, copies the local `data/` into it, initialises the local checkout and
 (or any other preprocessing script) writes the augmented images; `commit_lakefs.py` commits the
 processed dataset, optionally merges it into `main` and checks `main` out again, and commits the
 current data reference to Git.
+
+Transcription of Figure 4.9 (same elements and labels; German labels translated):
+
+```mermaid
+flowchart LR
+    D["data (local directory)"] -- copy --> R["LakeFS repository (branch main)"]
+    subgraph S1["setup_lakefs.py"]
+        s1["1. mc mb: create MinIO bucket<br/>2. lakectl repo create: create LakeFS repository<br/>3. mc cp: copy data into the LakeFS repository<br/>4. lakectl local init: initialise local LakeFS repository<br/>5. lakectl commit: commit in the LakeFS repository"]
+    end
+    subgraph S2["prepare_lakefs_branch.py"]
+        s2["1. lakectl branch create: create new branch in LakeFS<br/>2. lakectl local checkout: check out the new branch"]
+    end
+    subgraph S3["data_augmentation.py"]
+        s3["run any scripts that preprocess the data<br/>(here data_augmentation.py): generate the augmented images"]
+    end
+    subgraph S4["commit_lakefs.py"]
+        s4["1. lakectl local commit: commit the processed dataset<br/>2. lakectl merge: merge with main branch in LakeFS (optional)<br/>3. lakectl local checkout: check out LakeFS main branch (optional)<br/>4. git add, git commit, git push: link the current data reference in LakeFS with Git"]
+    end
+    R --> S1 --> S2 --> S3 --> S4
+    S2 -. "branch augmented" .-> S4
+    S4 -. "optional: merge into main" .-> R
+```
 
 Implementation note: the figure lists `mc` (MinIO client) commands; the implementation creates the
 bucket with boto3 and uploads through `lakectl local commit`, so no object-store client is needed.
@@ -154,6 +190,27 @@ Implementation note: the thesis's training script `main_seitlich.py` is split in
 With DVC's copy variant every user keeps each data version both in a local cache and in the
 workspace (here two users with 2 × 300 GB each in cache and workspace next to 3 × 300 GB in remote
 storage), so the storage demand multiplies to 2.4 TB for 300 GB of data.
+
+Transcription of Figure 4.6 (same elements and labels; German labels translated):
+
+```mermaid
+flowchart LR
+    ST["Storage (e.g. SFTP, S3) with the versioned data<br/>3 × 300 GB"]
+    subgraph GPU["GPU server · total storage use: 2.4 TB · v1 = raw data, v2 = processed data"]
+        C1["User 1 cache:<br/>2 × 300 GB"]
+        W1["User 1 workspace:<br/>v1 = 300 GB<br/>v2.1 = 300 GB"]
+        C2["User 2 cache:<br/>2 × 300 GB"]
+        W2["User 2 workspace:<br/>v1 = 300 GB<br/>v2.2 = 300 GB"]
+    end
+    ST -- "dvc pull" --> C1
+    C1 -- "dvc push" --> ST
+    ST -- "dvc pull" --> C2
+    C2 -- "dvc push" --> ST
+    C1 -- copy --> W1
+    W1 -- "dvc add" --> C1
+    C2 -- copy --> W2
+    W2 -- "dvc add" --> C2
+```
 
 - *Context:* With larger datasets DVC keeps data both in its cache and in the workspace, increasing storage demand; local or repository-based approaches reach their limits.
 - *Decision:* LakeFS versions data directly on the object store with Git concepts and without duplication, scales to very large volumes, and offers a web UI, user management and APIs.
