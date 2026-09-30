@@ -13,6 +13,10 @@ ARG ENABLE_PROMETHEUS_METRICS=false
 
 WORKDIR /app
 
+# Least privilege (NFR-07): the server runs as an unprivileged user. Packages are installed as
+# root below; the application files are handed to that user, and port 8080 needs no privileges.
+RUN useradd --system --uid 10001 --create-home --home-dir /home/serving --shell /usr/sbin/nologin serving
+
 # Install only the common serving dependencies first. Model-source/runtime packages
 # are selected below so a standalone local model does not require the MLflow runtime.
 RUN pip install --no-cache-dir \
@@ -43,7 +47,7 @@ RUN if [ "$MODEL_SOURCE" = "mlflow" ]; then \
     fi
 
 # Copy the resolved MLflow artifact or the selected standalone model file.
-COPY container/model_artifact/ ./model_artifact/
+COPY --chown=serving:serving container/model_artifact/ ./model_artifact/
 
 # Preserve existing MLflow model-specific dependency installation. A standalone
 # single-file model intentionally does not infer arbitrary custom dependencies.
@@ -51,7 +55,7 @@ RUN if [ "$MODEL_SOURCE" = "mlflow" ] && [ -f "./model_artifact/requirements.txt
       pip install --no-cache-dir -r ./model_artifact/requirements.txt; \
     fi
 
-COPY serving/ ./serving/
+COPY --chown=serving:serving serving/ ./serving/
 
 ENV MODEL_NAME=${MODEL_NAME} \
     MODEL_VERSION=${MODEL_VERSION} \
@@ -60,6 +64,9 @@ ENV MODEL_NAME=${MODEL_NAME} \
     MODEL_FORMAT=${MODEL_FORMAT} \
     MODEL_FILE=${MODEL_FILE} \
     ENABLE_PROMETHEUS_METRICS=${ENABLE_PROMETHEUS_METRICS}
+
+ENV HOME=/home/serving
+USER serving
 
 EXPOSE 8080
 ENTRYPOINT ["python", "-m", "serving.entrypoint"]

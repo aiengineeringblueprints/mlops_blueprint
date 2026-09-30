@@ -377,7 +377,7 @@ Run the same command without `--dry-run`:
 python model_deployment/deploy.py --backend <backend>
 ```
 
-The common workflow resolves the model source, prepares the serving image, applies the selected backend, waits for readiness, and configures the backend-specific monitoring path.
+The common workflow resolves the model source, prepares the serving image, applies the selected backend, waits for readiness, and configures the backend-specific monitoring path. The serving image runs its server as the unprivileged user `serving` (UID 10001); only the package installation happens as root during the build.
 
 
 ---
