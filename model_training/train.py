@@ -52,10 +52,12 @@ train_directory = str(MODEL_TRAINING_ROOT / "data" / "train")
 val_directory = str(MODEL_TRAINING_ROOT / "data" / "val")
 test_directory = str(MODEL_TRAINING_ROOT / "data" / "test")
 
-# Parameters:
+# Parameters: epochs and batch size come from the environment (.env or the shell) so that a
+# workflow can compare several runs with different hyperparameters; the defaults are the
+# thesis's values. Keras autologging records both as run parameters.
 image_size = (224, 224)
-epoch = 10
-batch_size = 32
+epoch = int(os.getenv("EPOCHS", "10"))
+batch_size = int(os.getenv("BATCH_SIZE", "32"))
 num_classes = len(os.listdir(train_directory))
 
 # MLflow: Start the tracking run
