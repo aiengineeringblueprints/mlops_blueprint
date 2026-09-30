@@ -1,0 +1,18 @@
+preprocess:
+  smote_strategy: 0.5      # Sampling-Strategie für SMOTE (None = deaktiviert)
+  test_size: 0.3           # Anteil Testdaten
+  val_size: 0.3            # Anteil Validierung aus dem Trainingsteil
+  random_state: 42
+
+train:
+  data_path: data/preprocessed/preprocessed_data.npz
+  epochs: 5
+  batch_size: 32
+  learning_rate: 0.001
+  use_class_weights: true
+
+evaluate:
+  data_path: data/preprocessed/preprocessed_data.npz
+  model_path: models/trained_nn_model.keras
+  decision_threshold: 0.5
+

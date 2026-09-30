@@ -1,0 +1,54 @@
+stages:
+  preprocess:
+    cmd: python load_and_preprocess.py
+    deps:
+    - load_and_preprocess.py
+    - data/raw/predictive_maintenance_dataset.csv
+    params:
+    - preprocess.smote_strategy
+    - preprocess.test_size
+    - preprocess.val_size
+    - preprocess.random_state
+    outs:
+    - data/preprocessed/preprocessed_data.npz
+    - models/scaler.joblib
+
+  train:
+    cmd: python train.py
+    deps:
+    - train.py
+    - data/preprocessed/preprocessed_data.npz
+    params:
+    - train.data_path
+    - train.epochs
+    - train.batch_size
+    - train.learning_rate
+    - train.use_class_weights
+    outs:
+    - models/trained_nn_model.keras
+    metrics:
+    - dvclive/metrics.json:
+        cache: false
+    plots:
+    - dvclive/plots:
+        cache: false
+
+  evaluate:
+    cmd: python evaluate.py
+    deps:
+    - evaluate.py
+    - data/preprocessed/preprocessed_data.npz
+    - models/trained_nn_model.keras
+    params:
+    - evaluate.data_path
+    - evaluate.model_path
+    - evaluate.decision_threshold
+    outs:
+    - results/model_evaluation_nn.png
+    - results/model_confusion_matrices_thresholds_0.25_to_0.50.png
+
+metrics:
+- dvclive/metrics.json
+plots:
+- dvclive/plots/metrics:
+    x: step
