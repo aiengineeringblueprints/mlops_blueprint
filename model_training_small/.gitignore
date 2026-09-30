@@ -1,0 +1,6 @@
+data/raw/*.csv
+data/preprocessed/
+models/
+dvclive/
+results/*.png
+.venv/

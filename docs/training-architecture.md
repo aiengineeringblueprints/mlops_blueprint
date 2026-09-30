@@ -11,7 +11,7 @@ The blueprint defines two variants, depending on the size of the data:
 | Large-data variant | Image data in the range of several hundred MB to GB (reference case: 339 images, about 854 MB) | LakeFS on an S3-compatible object store for data versioning; MLflow for experiment tracking and model management |
 | Small-data variant | Small tabular or time-series files (reference case: one CSV file of about 6.6 MB) | DVC (with DVCLive) for data versioning, pipelines and experiment tracking, all repository-based and serverless |
 
-**This implementation instantiates the large-data variant.** The reference application classifies images of 3D-printed bolts into defect classes or as defect-free; the class is given by the image's directory, and the data is split into `data/train`, `data/val` and `data/test`. The small-data variant is an architectural alternative and not part of this code base. Deployment and monitoring are out of scope (Section 6).
+**This implementation instantiates the large-data variant.** The reference application classifies images of 3D-printed bolts into defect classes or as defect-free; the class is given by the image's directory, and the data is split into `data/train`, `data/val` and `data/test`. The small-data variant is implemented in `model_training_small/` (a DVC pipeline with DVCLive; a persisted scaler and `predict.py` were added on 2026-09-30 so that the variant has an inference path). Deployment and monitoring are out of scope (Section 6).
 
 ## 2. Requirements catalog
 
