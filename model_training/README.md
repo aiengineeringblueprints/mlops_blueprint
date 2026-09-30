@@ -50,6 +50,9 @@ The complete sequence, from raw data to an exported champion model:
 `model_training/test/smoke_train.sh` runs exactly this sequence in a temporary copy and
 checks the result through the MLflow REST API.
 
+
+To compare runs with different hyperparameters, set `EPOCHS` and `BATCH_SIZE` (in `.env` or the shell) before `train.py`; every run is tracked, and `train.py` keeps the `champion` tag on the run with the best `CHAMPION_METRIC`, which `mlflow_registry.py` then registers under the alias.
+
 ## Using an existing S3
 
 To point the stack at an existing S3-compatible service (AWS, a company endpoint) instead of
