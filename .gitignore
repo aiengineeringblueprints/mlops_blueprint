@@ -24,6 +24,7 @@ model_deployment/deployments/docker_compose/.compose/
 # Virtual environments / packaging
 venv/
 .venv/
+.venv-train/
 env/
 *.egg-info/
 
