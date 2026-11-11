@@ -1,11 +1,15 @@
+import os
 import subprocess
 import sys
 import logging
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 MODEL_TRAINING_ROOT = Path(__file__).resolve().parent
+load_dotenv(MODEL_TRAINING_ROOT / ".env", override=False)
 
 
 def run_command(command, shell=False):
@@ -55,10 +59,12 @@ def commit_data(
             ]
         )
 
-    # Commit changes to Git
+    # Record the data version in git as well. Pushing requires a remote, which a fresh
+    # workspace does not have, so it is opt-in via GIT_PUSH=true.
     run_command(["git", "add", "."])
     run_command(["git", "commit", "-m", commit_message])
-    run_command(["git", "push"])
+    if os.getenv("GIT_PUSH", "false").lower() == "true":
+        run_command(["git", "push"])
 
 
 if __name__ == "__main__":
