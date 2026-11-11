@@ -31,7 +31,7 @@ The requirements are derived from Kumara et al. and Ruf et al., complemented by 
 | EV_5 | Low invasiveness | Tracking experiments and using the tool in general require only small interventions in and changes to existing code; integration into existing training scripts needs only minor adjustments. | Own definition |
 | MV_1 | Model registry | Models are stored in a central collection together with their version and metadata. | Ruf et al. |
 | MV_2 | Documentation on the model | Notes on how a model was created or how it is to be used can be documented directly with the model. | Own definition |
-| GA_1 | Scalability | The tool remains usable as the number and size of projects grows. | Ruf et al. |
+| GA_1 | Scalability | The tool remains usable as the number of users and projects grows. | Ruf et al. |
 | GA_2 | API available | A compatible API for controlling the tool is available; its functions can be accessed programmatically. | Ruf et al. |
 | GA_3 | Maturity of the tool | The tool is technically mature and at a stage where it is suitable for production use. | Ruf et al. |
 | GA_4 | Usability | The tool has an intuitive user interface and is understandable for non-technical people as well. | Ruf et al. |
@@ -102,14 +102,20 @@ The ratings are the thesis's evaluation on its three-level scale (`++` fully met
 | DV_3 | LakeFS on the object store | ++ | |
 | DV_4 | LakeFS | ++ | Branches without copying data |
 | DV_5 | (none) | LakeFS: - | |
-| EV_1, EV_2 | MLflow tracking | ++ | |
+| EV_1 | MLflow tracking | ++ | |
+| EV_2 | MLflow tracking | ++ | |
 | EV_3 | MLflow tracking | + | |
 | EV_4 | MLflow autologging | ++ | Keras autologging in `train.py` |
 | EV_5 | MLflow | + | |
 | MV_1 | MLflow Model Registry | ++ | |
 | MV_2 | MLflow Model Registry | + | Plus the exported model card |
-| GA_1, GA_2, GA_3, GA_5, GA_7 | LakeFS, MLflow | ++ (both) | |
-| GA_4, GA_8 | LakeFS, MLflow | + (both) | Own servers; LakeFS also an object store |
+| GA_1 | LakeFS, MLflow | ++ (both) | |
+| GA_2 | LakeFS, MLflow | ++ (both) | |
+| GA_3 | LakeFS, MLflow | ++ (both) | |
+| GA_5 | LakeFS, MLflow | ++ (both) | |
+| GA_7 | LakeFS, MLflow | ++ (both) | |
+| GA_4 | LakeFS, MLflow | + (both) | Own servers; LakeFS also an object store |
+| GA_8 | LakeFS, MLflow | + (both) | Own servers; LakeFS also an object store |
 | GA_6 | LakeFS, MLflow | ++ / + | |
 
 ## 4. Workflow
@@ -170,7 +176,7 @@ Implementation note: the thesis's training script `main_seitlich.py` is split in
 
 - **Every run pins an immutable data version.** The dataset input is a LakeFS commit ID, not a branch name; with the Git commit, a previous experiment's state can be restored.
 - **Data changes are isolated** on a separate LakeFS branch and reach training only through a commit.
-- **The test split is not used for selection.** `champion_validation.py` rejects a champion that is not tagged, whose selection metric is a test metric, or whose metric is not logged. Test metrics are for reporting only.
+- **The test split is not used for selection.** `champion_validation.py` rejects a champion that is not tagged, whose selection metric is a test metric, or whose metric is not logged. Test metrics are for reporting only: a model chosen on the test split would make its own test metric an optimistic estimate, so the test split stays untouched until the champion is fixed.
   Implementation note: the thesis defines no selection rule; this one is enforced by the implementation.
 - **Exactly one champion per experiment**; the alias refers to a registered version of that run.
 - **The model artifact carries its provenance**: version tags name the source run; the model card names run, selection metric and data version.
