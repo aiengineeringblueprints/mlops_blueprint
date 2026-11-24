@@ -76,10 +76,10 @@ The requirement catalogues with the source of each requirement, the design decis
 
 ## Evaluated version
 
-The version evaluated in the paper "AERA: Agent-Based Evaluation of Reference Architectures and Blueprints" is tag [`aera-evaluated`](https://github.com/aiengineeringblueprints/mlops_blueprint/tree/aera-evaluated), archived at [doi:10.5281/zenodo.24137665](https://doi.org/10.5281/zenodo.24137665). Later changes on `main` do not affect the results reported for that version.
+The version evaluated in the paper "AERA: Agent-Based Evaluation of Reference Architectures and Blueprints" is tag [`aera-evaluated-r1`](https://github.com/aiengineeringblueprints/mlops_blueprint/tree/aera-evaluated-r1), archived at [doi:10.5281/zenodo.24515075](https://doi.org/10.5281/zenodo.24515075). Later changes on `main` do not affect the results reported for that version.
 
 ## License and citation
 
 The blueprint is released under the MIT License, see [`LICENSE`](LICENSE).
 
-To cite the evaluated version, use its archived release: [doi:10.5281/zenodo.24137665](https://doi.org/10.5281/zenodo.24137665).
+To cite the evaluated version, use its archived release: [doi:10.5281/zenodo.24515075](https://doi.org/10.5281/zenodo.24515075).
